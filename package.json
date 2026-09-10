@@ -1,0 +1,62 @@
+{
+  "name": "dsh-ling",
+  "version": "0.1.0",
+  "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:三层记忆、从历史里长出来的人格档案、定型锁与自由生长",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "node tests/unit.mjs && node tests/capture.test.mjs && node tests/clock.test.mjs && node tests/deep.test.mjs && node tests/export.test.mjs && node tests/feedback.test.mjs && node tests/genesis.test.mjs && node tests/importfile.test.mjs && node tests/importlog.test.mjs && node tests/memories.test.mjs && node tests/suggest.test.mjs && node tests/summarize.test.mjs && node tests/tone.test.mjs",
+    "check": "node tools/check-install.mjs",
+    "check:publish": "node tools/check-publish.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek",
+    "deepseek-harness",
+    "plugin",
+    "memory",
+    "persona",
+    "companion",
+    "local-first",
+    "器灵"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NightPainters/dsh-ling.git"
+  },
+  "homepage": "https://github.com/NightPainters/dsh-ling#readme",
+  "bugs": {
+    "url": "https://github.com/NightPainters/dsh-ling/issues"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-api-session-controller"
+      ],
+      "platform": "web"
+    }
+  }
+}

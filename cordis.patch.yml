@@ -1,0 +1,8 @@
+# dsh-ling bundle patch: 器灵 · 记忆与人格助手
+# 注册行:loader id 必须等于包名(dsh-ling);HMR live 热载后浏览器硬刷即可看到 client 模块。
+- insert:
+    - id: dsh-ling
+      name: 'dsh-ling'
+      # config(可选,覆盖默认值):
+      #   dataDir: 覆盖数据目录(默认 $DSH_HOME/cache/dsh-ling)
+      #   injectEnabled: false  # 完全关闭系统提示注入(逃生开关)
