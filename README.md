@@ -119,6 +119,7 @@ npm test        # 13 套:人格组装 / 冻结门 / 记忆库 / L1 选择 / 导�
 
 | 文件 | 内容 |
 |---|---|
+| [`CHANGELOG.md`](./CHANGELOG.md) | 版本更新记录(当前 1.0.1) |
 | [`DESIGN.md`](./DESIGN.md) | 架构与设计决策(三层记忆、冻结门、注入面、存储结构) |
 | [`ACCESS-DESIGN.md`](./ACCESS-DESIGN.md) | 历史接入蓝图:三条通道、会话契约格式、导入流水线 |
 

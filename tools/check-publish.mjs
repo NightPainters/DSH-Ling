@@ -1,10 +1,10 @@
-// dsh-ling — 发布前检查:扫一遍仓库目录,揪出"绝不该上传"的东西。
+// dsh-ling — 发布前检查:扫一遍仓库目录,揪出"绝不该公开"的东西。
 //
-// 为什么需要它:.gitignore 只对 git 生效,**GitHub 网页拖拽上传不按 .gitignore 过滤** ——
-// 手动上传时,唯一的安全网就是发布前跑一次这个脚本。
+// 为什么需要它:`.gitignore` 只在 git 操作时生效 —— 用网页界面拖拽上传、打包分发、
+// 或把目录复制到别处发布时,它都不起作用。发布前跑一次本脚本,是最后一道闸。
 //
 // 用法: node tools/check-publish.mjs
-// 退出码:0 = 干净可以上传;1 = 有必须处理的东西
+// 退出码:0 = 干净可以发布;1 = 有必须处理的东西
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,5 +89,5 @@ if (warnings.length) {
 }
 if (!problems.length && !warnings.length) console.log('✓ 干净:没有发现不该上传的文件或可疑内容。\n');
 
-console.log('提示:GitHub 网页拖拽上传**不读 .gitignore** —— 上传前跑一次本脚本,比信任 .gitignore 更可靠。');
+console.log('提示:`.gitignore` 只在 git 操作时生效,直接复制/拖拽上传不受它约束 —— 发布前跑一次本脚本。');
 process.exit(problems.length ? 1 : 0);
