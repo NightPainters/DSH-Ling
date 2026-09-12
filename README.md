@@ -45,7 +45,7 @@
 
 ```bash
 # 0) 取得代码
-git clone https://github.com/NightPainters/dsh-ling
+git clone https://github.com/NightPainters/DSH-Ling
 
 # 1) 装进 DSH 的 profile(把 <路径> 换成你 clone 下来的实际路径)
 cd ~/.dsh/profiles/web

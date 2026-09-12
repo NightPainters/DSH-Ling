@@ -2,6 +2,15 @@
 
 本项目遵循语义化版本:`MAJOR.MINOR.PATCH`。
 
+## 1.0.3
+
+**行为调整:循环外模型调用跟随当前选择**
+
+- **深摘要等循环外调用不再写死模型**:深摘要、诞生仪式、语气归纳、自述起草统一经 `llmOnce` 发起,现在一律使用当前选择(`agentDefaultModel.currentSelection()`)的 `provider` / `model` —— 也就是你此刻选定的那个模型;读不到时才退到兜底值,并在日志里明确标记"本次不是跟随当前选择",不静默替你指定;
+- 循环外调用保持**低推理档**(`effort: 'low'`):它只做摘要与归纳,不需要高等级推理,与模式的推理档位无关;
+- 单测补齐(`tests/deep.test.mjs`):捕获真实 `llm.stream` 请求,断言发出的 `provider` / `model` 等于当前选择、不等于兜底值、档位恒为 `low`,以及不可读时 `followed: false`;
+- 仓库地址整理:README 的 `git clone` 与 `package.json` 的 `repository` / `homepage` / `bugs` 由旧名 `dsh-ling` 更新为 **`DSH-Ling`**(旧地址仍 301 可用)。
+
 ## 1.0.2
 
 **行为调整:模式只同步推理等级,不改模型**

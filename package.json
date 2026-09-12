@@ -1,6 +1,6 @@
 {
   "name": "dsh-ling",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:三层记忆、从历史里长出来的人格档案、定型锁与自由生长",
   "type": "module",
   "main": "./lib/index.js",
@@ -36,11 +36,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NightPainters/dsh-ling.git"
+    "url": "git+https://github.com/NightPainters/DSH-Ling.git"
   },
-  "homepage": "https://github.com/NightPainters/dsh-ling#readme",
+  "homepage": "https://github.com/NightPainters/DSH-Ling#readme",
   "bugs": {
-    "url": "https://github.com/NightPainters/dsh-ling/issues"
+    "url": "https://github.com/NightPainters/DSH-Ling/issues"
   },
   "engines": {
     "node": ">=22.5.0"
