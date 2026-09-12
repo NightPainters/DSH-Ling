@@ -1,0 +1,11 @@
+# 统一行尾:仓库内一律 LF。
+# 背景:Windows 上 Git 默认 core.autocrlf=true,会在检出时把 LF 转成 CRLF,
+# 导致"整仓 66 个文件看起来全被改过"的假差异(2026-09-13 踩过)。
+* text=auto eol=lf
+
+# 二进制文件不做行尾/文本处理
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+*.ico binary

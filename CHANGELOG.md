@@ -2,6 +2,14 @@
 
 本项目遵循语义化版本:`MAJOR.MINOR.PATCH`。
 
+## 1.0.2
+
+**行为调整:模式只同步推理等级,不改模型**
+
+- **模式切换不再修改模型**:工作 / 生活模式只同步**推理等级**(工作 = `max`、生活 = `low`),模型一律沿用你当前选定的那个。平台 API(`sessionController.selectModel` 与 `agentDefaultModel.saveSelection`)要求 `provider` / `model` **必填**(只有 `reasoningEffort` 可选),因此实现方式是"**先读当前选择 → 原样带回 → 只替换档位**";**读不到当前模型时放弃同步档位,而不是替你指定模型**;
+- 界面与文档口径同步:提示语由"平台默认模型"改为"推理等级";`DESIGN.md` 里模式相关的 6 处描述统一为"档位",默认映射只保留 `effort`;
+- 新增 `.gitattributes`(`* text=auto eol=lf`,图片与压缩包标记二进制),消除 Windows `core.autocrlf` 造成的行尾假差异。
+
 ## 1.0.1
 
 **文档与仓库治理**(无功能变更)

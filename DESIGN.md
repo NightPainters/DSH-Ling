@@ -10,11 +10,11 @@
 | # | 决策 | 内容 | 来源 |
 | --- | --- | --- | --- |
 | D1 | 按钮落位 | **方案 A**:官方 slot `conversation.session.header.utilities`(list,会话页顶栏右侧) | 用户拍板;spike ① |
-| D2 | 模式↔全局默认 | **跟随**:最近一次模式切换成为"之后新会话"的默认(平台 selectModel 会 best-effort 写全局默认,此副作用即机制) | 用户拍板;report-03 |
+| D2 | 模式↔全局默认 | **跟随**:最近一次模式切换成为"之后新会话"的默认(平台 selectModel 会 best-effort 写全局默认,此副作用即机制)。**2026-09-12 收敛:只同步推理等级,不改模型** —— provider/model 一律沿用当前值 | 用户拍板;report-03 |
 | D3 | 人格承载 | **自建注入段 + 设置页维护结构化字段**(称呼/自称/语气等),dsh-persona 不复用 | 用户拍板;report-04 |
 | D4 | 运行期冻结(新增) | **会话运行中(思考/任务进行中)不参与"人格更新层"的任何变化**:不打断、不新增设定、不中途改注入内容;更新请求一律排队,在该会话空闲边界才应用 | 用户本轮追加 |
 | D5 | 记忆加载策略 | 三层记忆(L0 常驻人格 / L1 开场 Top-K / L2 运行时检索),不注入全部概述 | 早前拍板 |
-| D6 | 模式语义 | 工作/生活 = 先验倾向,不硬过滤;差异 = 模型档位 + 记忆权重向量 + 风格块 | 早前拍板 |
+| D6 | 模式语义 | 工作/生活 = 先验倾向,不硬过滤;差异 = **推理档位** + 记忆权重向量 + 风格块(不改模型) | 早前拍板 |
 | D7 | 配置页 | 右键进入;内含"当前 L0/L1 现状"查看 | 早前拍板 |
 
 **插件命名**:工程目录/包名 `dsh-ling`(器灵);包显示名 "dsh-ling · 器灵";UI 文本语言 zh。
@@ -119,7 +119,7 @@ dsh-ling/
 | inject | `ctx.systemPrompt.section({name:'dsh-ling.persona', order: ORDER, text: fn})` | order 取部署 persona(0)之后、agent-instructions 之前(如 1000~2000);全局注册 + text 内按会话过滤(仅顶层、非 subagent,否则返回空串);report-02/R5 |
 | freeze | `ctx.on('agent/status')` 等维护每会话运行态 | idle|running 翻转事件(report-02) |
 | lifecycle | `agent/session-start`(定稿快照;source=startup)、`session/event`(顶层会话增量捕捉)、`turn/end`、`session/disposed`(归档点) | report-02 |
-| mode | `ctx.sessionController.selectModel({sessionId, provider, model, reasoningEffort})`;`modelCatalog()`/`resolveCallConfig` 预检 | report-03;effort 映射:工作=max / 生活=low(默认),映射表存 settings 可编辑 |
+| mode | `ctx.sessionController.selectModel({sessionId, provider, model, reasoningEffort})` —— **provider/model 必填(平台契约),故取当前选择原样带回,只替换 `reasoningEffort`;读不到当前模型则不调用**(宁可不切档位,也不替用户指定模型) | report-03;档位映射:工作=max / 生活=low(默认),存 settings 可编辑 |
 | memory | sqlite 存储(见 §9);增量写 own 表 | ctx.sessionQuery 用于补读(可选) |
 | api | `ctx.get?.('webServer').register({kind:'exact', path:'/api/dsh-ling/…'})` + `dsh-auth-` cookie 守卫 | ego-browser 先例(事实 9) |
 | (预留) llm | M2 概述器:经 ctx.llm 走适配器(不冻结 loop 请求,只做离线摘要) | report-03(llm/stream 只读护栏只约束 loop) |
@@ -148,9 +148,9 @@ dsh-ling/
     "life": "更有温度,可沿用用户偏爱的文风,允许共情与适度调侃"
   },
   "mode": {
-    "mapping": {                        // 档位映射表(用户可改)
-      "work": { "provider": "deepseek", "model": "deepseek-v4-flash", "effort": "max" },
-      "life": { "provider": "deepseek", "model": "deepseek-v4-flash", "effort": "low" }
+    "mapping": {                        // 档位映射表(用户可改):只含推理等级,不含模型
+      "work": { "effort": "max" },
+      "life": { "effort": "low" }
     },
     "lastMode": "life"                  // 跟随(D2):最后使用的模式
   },
@@ -244,7 +244,7 @@ dsh-ling/
 - 冻结门可见性:卡内"L0/L1 现状"面板始终显示目标会话 running/idle 状态(来自宿主 agent/status 维护表),running 会话的编辑按钮标"空闲后生效"。
 - 内容区(Tab):
   1. **人格**:上表 persona 字段表单(逐字段;称呼/自称旁附"从历史语料建议"占位按钮(点击调 `/api/dsh-ling/persona/suggest`——M2 接离线脚本,先行返回 501));提交后 POST `/api/dsh-ling/persona`(宿主写 settings 并按冻结规则应用)。
-  2. **模式与模型**:mode.mapping 两行(provider/model/effort 下拉/文本);mode.lastMode 只读显示;说明"新会话默认跟随最后使用的模式(D2)"。
+  2. **模式与推理等级**:mode.mapping 两行(仅 effort 档位选择);模型由用户自己在平台 UI 里选、插件不碰;mode.lastMode 只读显示;说明"新会话默认跟随最后使用的模式(D2)"。
   3. **记忆**:l1BudgetTokens/l1MaxItems/weights(work/life 两行 × 三领域滑块 0..1)/trackWorkspaces;l0Always、l1Enabled 开关。
   4. **L0/L1 现状**(D7):只读面板,GET `/api/dsh-ling/state?sessionId=…`:当前 L0 文本(渲染后)、本会话模式、L1 当前列表(每条:标题/日期/来源/得分)、pending 更新队列状态;运行中的会话标注"运行中(快照冻结)"。
   5. **数据**:导出按钮(GET `/api/dsh-ling/export` → 下载 dsh-ling-memory-<date>.dshling.json,格式 §9);合并输入(文件选择 → POST `/api/dsh-ling/import`,冲突规则:同 conv_id 且同 source 跳过/覆盖由 manifest 决定,外来条目标 origin,persona 永不覆盖)。
@@ -350,7 +350,7 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 
 | 方法/路径 | 用途 | 冻结门 |
 | --- | --- | --- |
-| POST `/mode/toggle` body{sessionId} | 切换模式(记录+selectModel+重定稿) | 运行中→排队返回 queued |
+| POST `/mode/toggle` body{sessionId} | 切换模式(记录 + 只同步推理档位、不改模型 + 重定稿) | 运行中→排队返回 queued |
 | GET `/state?sessionId=` | L0 文本/模式/L1 列表/队列状态(设置页与右键菜单用) | 只读 |
 | GET `/state?sessionId=&l0Preview=1` | 人格字段实时预览(编辑中) | 只读 |
 | POST `/persona` body=字段 | 写 persona(→settings ns)并触发应用 | 见冻结门 |
@@ -372,7 +372,7 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 - **M1b 安装验证(需用户配合:备份→加依赖→插行→热载→已登录浏览器目检)**
   - [ ] 按钮出现在会话页顶栏;左右键行为;运行中点击提示"空闲后生效"
   - [ ] 新会话 L0 注入(空称呼 / 已填写两种);KV 无异常重复
-  - [ ] 模式切换:模型档位实际变化(会话内下拉可见);新会话默认跟随 lastMode
+  - [ ] 模式切换:**推理档位**实际变化(会话内档位选择处可见);**模型保持不变**;新会话默认跟随 lastMode
   - [ ] 运行中(长任务)切模式/改人格:确认 running 区间快照与档位不变、空闲后生效
   - [ ] 设置卡读写 settings.yaml;导出文件可导入回(合并规则生效)
 - **回滚**:移除 patch 行 + 撤依赖 → host 侧 HMR 卸载;client 硬刷后消失;数据目录保留不影响回滚。
@@ -401,7 +401,7 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 3. **注入段 text 签名**:按 REPORT-02 "组装上下文 {agent,scope,signal}" 实现 `text(assembly)`(agent→sessionId→快照),已在真机验证注册成功(kv: inject.section_registered=1);payload 字段名按真实事件自适应。
 4. **client 状态轮询**:按钮运行态/当前会话用 3s 轮询 `/state`(宿主侧最近活跃启发式),后续换 connection/事件驱动。
 5. **交互修订(用户 2026-09-07)**:不用右键打开菜单(防误触浏览器菜单)→ **左键=切模式;悬停 1.5 秒=菜单**(contextmenu 一律 preventDefault);client 模块必须导出 `inject:['slots','locale','connection']`(缺失则 ctx.slots 为空、按钮静默不挂载——M1b 实证教训,已修复)。
-6. **mode 映射默认值**:provider=`deepseek`、model=`deepseek-v4-flash`、effort work=`max`/life=`low`(设置可改;安装时按真实模型目录校准)。
+6. **mode 映射**:早期默认值为 provider=`deepseek`、model=`deepseek-v4-flash`、effort work=`max`/life=`low`(设置可改);**2026-09-12 起只保留 effort** —— 模式切换不再改模型,provider/model 取当前值原样带回(详见 §0 D2 与 §4 mode 行)。
 7. **webServer 启动竞态**:registerApi 采用 svc→ctx.inject 子作用域→3s 定时重试三级获取,路由挂载成功才落 kv(api.registered=1,真机已验证)。
 
 ## 附录 B:历史会话接入蓝图(2026-09-08 方向已拍板)
