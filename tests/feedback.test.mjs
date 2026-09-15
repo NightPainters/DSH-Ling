@@ -40,16 +40,16 @@ ingestFeedbackEntries(db, [{ sessionId: 'sess-hit', messageId: 'am1', rating: 'p
 const after = db.overviewById('dsh', 'sess-hit').hit_count;
 check(after === before + 1, '点赞热度 +1: ' + before + '→' + after);
 
-// 4) 采纳 → 追加惯例(去重)并置 applied
+// 4) 采纳 → 落到**习惯**(2026-09-15 二分:点踩建议是她长出来的东西,不再直达规矩)
 const r4 = await applySuggestionAsRule(db, settings, q[0].id);
-check(r4.ok && settings.get().persona.hardRules.length === 1, '采纳后惯例 +1');
+check(r4.ok && settings.get().persona.habits.length === 1, '采纳后习惯 +1');
 const r4b = await applySuggestionAsRule(db, settings, q[0].id);
 check(!r4b.ok && r4b.reason === 'status:applied', '重复采纳被拒(状态守卫)');
 const again = await ingestFeedbackEntries(db, [{ sessionId: 's1', messageId: 'm9', rating: 'negative', note: '别老引经据典,直给结论' }]);
 check(again.queued === 1, '相同文案新条目可入队(采纳时按文案去重)');
 const dupRow = db.listFeedback({ status: 'new' })[0];
 await applySuggestionAsRule(db, settings, dupRow.id);
-check(settings.get().persona.hardRules.length === 1, '同文案去重,不重复追加');
+check(settings.get().persona.habits.length === 1, '同文案去重,不重复追加');
 
 // 5) 忽略
 const r5 = await ingestFeedbackEntries(db, [{ sessionId: 's2', messageId: 'm1', rating: 'negative', note: '忽略我' }]);

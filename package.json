@@ -1,6 +1,6 @@
 {
   "name": "dsh-ling",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:三层记忆、从历史里长出来的人格档案、定型锁与自由生长",
   "type": "module",
   "main": "./lib/index.js",
@@ -18,7 +18,7 @@
     "NOTICE"
   ],
   "scripts": {
-    "test": "node tests/unit.mjs && node tests/capture.test.mjs && node tests/clock.test.mjs && node tests/deep.test.mjs && node tests/export.test.mjs && node tests/feedback.test.mjs && node tests/genesis.test.mjs && node tests/importfile.test.mjs && node tests/importlog.test.mjs && node tests/memories.test.mjs && node tests/mode.test.mjs && node tests/suggest.test.mjs && node tests/summarize.test.mjs && node tests/tone.test.mjs",
+    "test": "node tests/unit.mjs && node tests/capture.test.mjs && node tests/clock.test.mjs && node tests/deep.test.mjs && node tests/export.test.mjs && node tests/feedback.test.mjs && node tests/genesis.test.mjs && node tests/habitgen.test.mjs && node tests/idle.test.mjs && node tests/importfile.test.mjs && node tests/importlog.test.mjs && node tests/l1lines.test.mjs && node tests/memories.test.mjs && node tests/mode.test.mjs && node tests/rules.test.mjs && node tests/suggest.test.mjs && node tests/summarize.test.mjs && node tests/times.test.mjs && node tests/tone.test.mjs && node tests/tools.test.mjs",
     "check": "node tools/check-install.mjs",
     "check:publish": "node tools/check-publish.mjs"
   },

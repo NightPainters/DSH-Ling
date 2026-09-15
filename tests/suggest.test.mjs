@@ -54,7 +54,7 @@ const a2 = await applyCorpusSuggestion(db, settings, aiRow.id);
 check(!a2.ok && a2.reason === 'status:adopted', '重复采纳被拒');
 const hrRow = list.find((x) => x.kind === 'hardrule');
 const h1 = await applyCorpusSuggestion(db, settings, hrRow.id);
-check(h1.ok && settings.get().persona.hardRules.includes(hrRow.value), '采纳 hardrule → hardRules');
+check(h1.ok && settings.get().persona.habits.some((h) => h.text === hrRow.value), '采纳 hardrule → 落到习惯(不再直达规矩)');
 const utRow = list.find((x) => x.kind === 'userTitle');
 if (utRow) {
   const u1 = await applyCorpusSuggestion(db, settings, utRow.id);

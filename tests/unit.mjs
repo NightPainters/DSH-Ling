@@ -1,4 +1,4 @@
-﻿// dsh-ling M1a unit tests — plain node, zero deps.
+// dsh-ling M1a unit tests — plain node, zero deps.
 // Run: node tests/unit.mjs
 import { ok, eq, section, summary } from './harness.mjs';
 import { readFileSync, mkdtempSync } from 'node:fs';
@@ -12,10 +12,11 @@ const imp = (rel) => import(pathToFileURL(join(root, rel)).href);
 // ---------------------------------------------------------------- persona
 await section('persona 组装');
 {
-  const { assemblePersona, coreNameOf, userTitleForMode, DEFAULT_SETTINGS } = await imp('lib/host/persona.js');
+  const { assemblePersona, coreNameOf, userTitleForMode, DEFAULT_SETTINGS, PRONOUN_PRESETS, pronounOf, pronounize } = await imp('lib/host/persona.js');
   const empty = assemblePersona(DEFAULT_SETTINGS, 'life');
   ok(empty.includes('[身份·器灵]'), '空字段输出最小身份段(标题=器灵)');
-  ok(empty.includes('存身于用户的 DeepSeek Harness 之中'), '措辞=存身于');
+  ok(empty.includes('你是 DeepSeek 助手'), '空自称回退默认身份句');
+  ok(!empty.includes('DeepSeek Harness'), '不再重复宿主已声明的平台名(瘦身)');
   ok(!empty.includes('灵灵') && !empty.includes('dsh-ling'), '空字段不出现占位自称/内部名');
   eq(coreNameOf('小灵/灵灵'), '小灵', 'coreName 取首段');
   eq(coreNameOf('灵灵/小灵'), '灵灵', 'coreName 仍取首段');
@@ -35,6 +36,19 @@ await section('persona 组装');
   const punct = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, aiName: '灵灵', aiTitle: '拜上。' } }, 'life');
   ok(punct.includes('拜上。') && !punct.includes('。。'), '句尾标点去重');
 
+  // 代词:默认「她」;预设不含「祂」(中文里祂专指神祇 —— 放进预设等于替用户宣称神性);自定义不受限
+  eq(DEFAULT_SETTINGS.persona.pronoun, '她', '代词默认=她');
+  eq(PRONOUN_PRESETS.join('/'), '她/他/TA/它', '代词预设 = 她/他/TA/它');
+  ok(!PRONOUN_PRESETS.includes('祂'), '预设刻意不含「祂」');
+  eq(pronounOf(DEFAULT_SETTINGS), '她', 'pronounOf 默认回退=她');
+  eq(pronounOf({ persona: { pronoun: '  他 ' } }), '他', 'pronounOf 去空白');
+  eq(pronounOf({ persona: { pronoun: '' } }), '她', 'pronounOf 空串回退');
+  eq(pronounOf({ persona: { pronoun: '祂' } }), '祂', '自定义「祂」可透传(不禁止,只是不预设)');
+  eq(pronounOf({ persona: { pronoun: '一二三四五六七八' } }), '一二三四五六', 'pronounOf 限长 6 字');
+  eq(pronounize('她是器灵,让她自己说', '她'), '她是器灵,让她自己说', 'pronounize 默认不改动');
+  eq(pronounize('她是器灵,让她自己说', '他'), '他是器灵,让他自己说', 'pronounize 按设定替换');
+  eq(pronounize('她是器灵', ''), '她是器灵', 'pronounize 空代词不改动');
+
   const fish = assemblePersona({
     ...DEFAULT_SETTINGS,
     persona: {
@@ -48,18 +62,18 @@ await section('persona 组装');
   }, 'life');
   ok(fish.includes('[身份·灵灵]'), '身份段标题取自称首段');
   ok(fish.includes('你是"灵灵"'), '自称生效');
-  ok(fish.includes('存身于'), '正文含 存身于');
+  ok(!fish.includes('存身于'), '注入面不再重复平台名(瘦身)');
   ok(fish.includes('你称用户为"老板"'), '称呼生效');
   ok(!fish.includes('铁律'), '不再出现 铁律 措辞');
-  ok(fish.includes('底线:') && fish.includes('绝不编造历史记忆'), '底线段生效(在惯例前)');
-  ok(fish.indexOf('底线:') < fish.indexOf('惯例:'), '底线在惯例之前');
-  ok(fish.includes('惯例:') && fish.includes('引用历史记忆必须注明出处'), '惯例段生效');
+  ok(fish.includes('底线:') && fish.includes('绝不编造历史记忆'), '底线段生效(在规矩前)');
+  ok(fish.indexOf('底线:') < fish.indexOf('[规矩]'), '底线在规矩之前');
+  ok(fish.includes('[规矩]') && fish.includes('引用历史记忆必须注明出处'), '规矩段生效');
   ok(fish.includes('[设定]') && fish.includes('2025 年初'), 'extraLore 生效');
-  ok(fish.includes('[本会话模式:生活]'), '模式风格块生效');
+  ok(fish.includes('[生活模式]'), '模式风格块生效');
   const firstSeg = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, aiName: '小灵/灵灵' } }, 'life');
   ok(firstSeg.includes('[身份·小灵]'), '“小灵/灵灵”标题取首段=小灵');
   const work = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, aiName: '灵灵' } }, 'work');
-  ok(work.includes('[本会话模式:工作]') && work.includes('克制'), '工作风格块生效');
+  ok(work.includes('[工作模式]') && work.includes('克制'), '工作风格块生效');
   eq(assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, enabled: false } }, 'life'), '', 'enabled=false 输出空');
   // 语气基线随模式切换(P0):toneWork/toneLife 空 = 跟随 tone
   const tp = {
