@@ -357,14 +357,14 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 | POST `/mode/toggle` body{sessionId} | 切换模式(记录 + 只同步推理档位、不改模型 + 重定稿) | 运行中→排队返回 queued |
 | GET `/state?sessionId=` | L0 文本/模式/L1 列表/队列状态(设置页与右键菜单用) | 只读 |
 | GET `/state?sessionId=&l0Preview=1` | 人格字段实时预览(编辑中) | 只读 |
-| POST `/persona` body=字段 | 写 persona(→settings ns)并触发应用 | 见冻结门 |
+| POST `/persona` body=字段 | 写 persona(→settings ns;**字段白名单**,白名单外的键丢弃并回报 `ignored`)并触发应用 | 见冻结门 |
 | GET `/persona/suggest` | 人格档案草稿(M2;先行 501) | — |
 | POST `/memory/refresh` body{sessionId?} | 显式重定稿 | 运行中→排队 |
 | GET `/export` | 下载记忆包(§8) | 只读 |
 | POST `/import` (multipart) | 合并记忆包 | 只读(写库旁路,不碰注入) |
 | GET `/health` | 存活与版本 | — |
 
-守卫:全部经 `dsh-auth-` cookie 判定(ego-browser 模式);loopback 来源。
+守卫(2026-09-17 加固 ③④):**来源栅栏** —— Host 必须是 loopback(`127.0.0.0/8` / `::1` / `localhost`),或 `settings.guard.trustedHosts` 里**显式声明**的 authority(**本机 LAN 地址不再自动信任**;要整段 LAN 需 `guard.allowLan: true`);`Sec-Fetch-Site: cross-site` 直接拒;带 `Origin` 时其 host 须等于请求 Host。**身份对撞** —— 期望 cookie 名 = `dsh-auth-` + base64url(sha256(规范化 Host)),与 DSH 同法(不校验值的签名,故本机原生进程仍可调用)。**字段白名单** —— `/persona` 与 `/import` 只接受 `persona` / `styles` 的白名单字段,其余丢弃并在响应里回报 `ignored`。拒绝一律 403 + reason。
 
 ## 10. 里程碑与验证清单
 

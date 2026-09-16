@@ -1,6 +1,6 @@
 {
   "name": "dsh-ling",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:三层记忆、从历史里长出来的人格档案、定型锁与自由生长",
   "type": "module",
   "main": "./lib/index.js",
