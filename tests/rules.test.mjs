@@ -87,7 +87,7 @@ const legacy = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETT
 check(legacy.includes('[规矩](用户的指令,可直接追加)') && legacy.includes('- 讲话别太晦涩'), '旧 hardRules 兼容为规矩');
 
 // 11) 用户也能提议习惯(byUser),仍须确认才落地
-r = await R.proposeHabit({ settings, habit: '少用感叹号', evidence: '尝生提议', byUser: true });
+r = await R.proposeHabit({ settings, habit: '少用感叹号', evidence: '用户提议', byUser: true });
 check(r.ok && R.habitsPendingOf(settings).some((h) => h.byUser === true), '用户可提议习惯');
 check(R.habitsOf(settings).length === 1, '用户提议同样不直接落地');
 
@@ -105,7 +105,7 @@ check(/pronoun:\s*s\?\.persona\?\.pronoun/.test(infoBlock), 'personaInfo 带出 
 const clientSrc = readFileSync(join(root, 'lib/client.js'), 'utf8');
 check(/function inputLock[\s\S]{0,600}pronounSel\.disabled\s*=\s*locked/.test(clientSrc), 'inputLock 禁用代词选择器(契约类,与自称/称呼同规格)');
 check(/pronounInput\.disabled\s*=\s*locked/.test(clientSrc), 'inputLock 禁用代词自定义输入框');
-check(!/确需删改/.test(clientSrc), '习惯区不再解释"改动需手术"(只读即说明,2026-09-16 尝生)');
+check(!/确需删改/.test(clientSrc), '习惯区不再解释"改动需手术"(只读即说明,2026-09-16 用户)');
 
 console.log(ok ? '规矩/习惯 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

@@ -64,7 +64,7 @@ check(/材料模拟/.test(text0), 'L1 命中既有概述');
 // 2) 运行中:即使记忆变了也绝不刷新(D4)
 gate.setRunning(SID, true);
 mem.kvSet('memory_version', 'v-running');
-seed(mem, 'new-1', '主动意识层设计讨论');
+seed(mem, 'new-1', '新功能设计讨论');
 const rRunning = silent(() => refreshIdleSnapshot(gate, mem, settings, SID, { now: 1000, minIntervalMin: 0 }));
 check(rRunning.refreshed === false && rRunning.reason === 'running', 'running 时拒绝刷新:' + JSON.stringify(rRunning));
 check(gate.snapshotOf(SID).text === text0, 'running 期间快照文本逐字节不变(D4)');
@@ -74,7 +74,7 @@ gate.setRunning(SID, false); // running→idle 翻转
 const r1 = silent(() => refreshIdleSnapshot(gate, mem, settings, SID, { now: 2000, minIntervalMin: 0 }));
 check(r1.refreshed === true && r1.reason === 'rebuilt', '空闲边界重建成功:' + JSON.stringify(r1));
 const text1 = gate.snapshotOf(SID).text;
-check(/主动意识层设计讨论/.test(text1), '新概述进入 L1');
+check(/新功能设计讨论/.test(text1), '新概述进入 L1');
 check(gate.snapshotOf(SID).keywords && JSON.stringify(gate.snapshotOf(SID).keywords) === kw0, '重建后关键词上下文保持');
 
 // 4) 留痕:重建计数 +1
