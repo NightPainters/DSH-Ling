@@ -34,8 +34,10 @@ turn('s4', 'user', '太虚了,来点实际的');
 // 4) 助手的轮次不算(只扫真人)
 turn('s5', 'assistant', '太啰嗦了太啰嗦了太啰嗦了');
 
-const cands = scanCorrections(mem);
+// 显式放宽到旧阈值(3 次 / 2 会话)跑下面的语义断言;现行默认是 4 次 / 3 会话(见第 6 节)
+const cands = scanCorrections(mem, { minHits: 3, minSessions: 2 });
 check(cands.length === 1, `只应有 1 条候选,实得 ${cands.length}:${JSON.stringify(cands.map((c) => c.key))}`);
+check(scanCorrections(mem).length === 0, '默认阈值(≥4 次且跨 ≥3 会话)下,3 次/2 会话的样本不算模式(2026-09-16 定案)');
 const v = cands[0] || {};
 check(v.key === 'verbose', '命中的是「啰嗦」桶:' + v.key);
 check(v.hits === 3, `命中 3 次,实得 ${v.hits}`);
@@ -59,7 +61,7 @@ check(ev.includes('太啰嗦了'), '证据串含原话');
 check(ev.length <= 300, '证据串 ≤300 字,实得 ' + ev.length);
 const sum = summarizeScan(cands);
 check(sum.length === 1 && sum[0].text === v.rule && sum[0].hits === 3 && sum[0].sessions === 2, '人读摘要字段齐全');
-check(SCAN_DEFAULTS.minHits >= 2 && SCAN_DEFAULTS.minSessions >= 2, '默认阈值严格(≥2 次且有跨会话要求)');
+check(SCAN_DEFAULTS.minHits === 4 && SCAN_DEFAULTS.minSessions === 3, '默认阈值 = 4 次 / 跨 3 会话(2026-09-16 定案:3/2 → 4/3)');
 
 // 7) 库结构异常时静默退化(不能拖累调用方)
 const broken = { db: { prepare() { throw new Error('db busy'); } } };
@@ -151,6 +153,18 @@ const llmBothEmpty = async (o) => { bothCalls.push(o.effort); return { text: '',
 const r4 = await reflectWithRetry(llmBothEmpty, { system: 's', material: 'x'.repeat(500), maxTokens: 4000, effort: 'low' });
 check(bothCalls.join() === 'low,off' && r4.attempts.length === 2 && r4.text === '', '两档皆空:调用两次、text 仍为空(接口据此落诊断)');
 check(REFLECT_RETRY.retryEffort === 'off', '重试档位固定为 off(不思考,保证有可见输出)');
+
+// ── 通道 A:新默认阈值(≥4 次且跨 ≥3 会话)仍然接受真实模式 ──
+const mem2 = new MemoryStore(join(dir, 'm2.db'));
+let seq2 = 0;
+const turn2 = (sid, text) => mem2.appendRawTurn(sid, { seq: ++seq2, role: 'user', ts: null, model: null, text });
+turn2('t1', '太啰嗦了,说重点');
+turn2('t1', '回答太长');
+turn2('t2', '废话太多,直接给结论');
+turn2('t3', '能不能短点');
+const strictCands = scanCorrections(mem2);
+check(strictCands.length === 1 && strictCands[0].key === 'verbose', '4 次纠正跨 3 个会话 → 默认阈值下仍命中');
+check(strictCands[0].hits === 4 && strictCands[0].sessions === 3, `命中统计正确(4 次 / 3 会话),实得 ${strictCands[0].hits} 次 / ${strictCands[0].sessions} 会话`);
 
 console.log(ok ? '习惯生成器(A 数出来的 + B 想出来的)全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

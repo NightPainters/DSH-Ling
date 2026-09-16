@@ -107,5 +107,31 @@ check(/function inputLock[\s\S]{0,600}pronounSel\.disabled\s*=\s*locked/.test(cl
 check(/pronounInput\.disabled\s*=\s*locked/.test(clientSrc), 'inputLock 禁用代词自定义输入框');
 check(!/确需删改/.test(clientSrc), '习惯区不再解释"改动需手术"(只读即说明,2026-09-16 用户)');
 
+// 14) 待确认队列上限(2026-09-16 定案:5)
+//     珍贵的东西不排队:满了要**明确驳回并说明**,而不是无限堆积或静默丢弃。
+check(R.PENDING_MAX_DEFAULT === 5, 'PENDING_MAX_DEFAULT = 5');
+{
+  const capDir = mkdtempSync(join(tmpdir(), 'ling-cap-'));
+  const capSet = new SettingsFile(join(capDir, 'set'));
+  const ids = [];
+  for (let i = 1; i <= 5; i += 1) {
+    const rr = await R.proposeHabit({ settings: capSet, habit: `习惯样本${i}`, evidence: 'e' });
+    if (rr.ok) ids.push(rr.id);
+  }
+  check(ids.length === 5 && R.habitsPendingOf(capSet).length === 5, '可以积满 5 条待确认');
+  const over = await R.proposeHabit({ settings: capSet, habit: '第六条的样本', evidence: 'e' });
+  check(over.ok === false && over.reason === 'pending-full' && over.limit === 5 && over.pending === 5, '第 6 条被驳回(pending-full / 上限 5):' + JSON.stringify(over));
+  check(R.habitsPendingOf(capSet).length === 5, '被驳回的提议没有偷偷入队');
+  const rej = await R.resolveHabit({ settings: capSet, id: ids[0], action: 'reject' });
+  check(rej.ok === true && R.habitsPendingOf(capSet).length === 4, '驳回一条即腾出位子');
+  const again = await R.proposeHabit({ settings: capSet, habit: '第六条的样本', evidence: 'e' });
+  check(again.ok === true, '腾出位子后可以再提');
+  await capSet.update({ habits: { pendingMax: 2 } });
+  check(R.pendingMaxOf(capSet) === 2, 'pendingMax 可配(settings.habits.pendingMax)');
+  const over2 = await R.proposeHabit({ settings: capSet, habit: '第七条的样本', evidence: 'e' });
+  check(over2.ok === false && over2.limit === 2, '改配置后按新上限驳回');
+  check(R.rulesView(capSet).caps.pending === 2, 'rulesView.caps.pending 暴露上限(面板显示 5/5 用)');
+}
+
 console.log(ok ? '规矩/习惯 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);
