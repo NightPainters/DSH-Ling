@@ -298,6 +298,8 @@ CREATE TABLE conv_overview (
   conv_id TEXT NOT NULL,            -- dsweb=导出会话 uuid / dsh=session id
   source TEXT NOT NULL CHECK(source IN ('dsweb','dsh')),
   title TEXT NOT NULL,
+  title_locked INTEGER NOT NULL DEFAULT 0,  -- v3(D2):1=名字已定(主人手改或 AI 点名),概述器一律不覆盖
+  title_by TEXT NOT NULL DEFAULT '',        -- v4(D2):定名者 'user'(主人手改)/ 'ai'(机器起名);界面统一显示「已定名」,归属只进悬浮说明
   started_at TEXT, updated_at TEXT,
   domain_tags TEXT NOT NULL DEFAULT '[]',   -- JSON 数组,多标签
   keywords TEXT NOT NULL DEFAULT '[]',      -- JSON 数组
@@ -360,6 +362,12 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 | POST `/persona` body=字段 | 写 persona(→settings ns;**字段白名单**,白名单外的键丢弃并回报 `ignored`)并触发应用 | 见冻结门 |
 | GET `/persona/suggest` | 人格档案草稿(M2;先行 501) | — |
 | POST `/memory/refresh` body{sessionId?} | 显式重定稿 | 运行中→排队 |
+| GET `/memories/sources` | 各来源条数(D8;记忆中心筛选栏显示「历史网页端 (1523)」) | 只读 |
+| POST `/memories/rename` body{source,conv_id,title} | 主人手改标题并**上锁**(`title_locked=1`,`title_by='user'`):概述器重建与批量重命名此后不再覆盖;锁住的是自动重写,**不锁主人** | 写库旁路,不碰注入 |
+| POST `/memories/retitle` body{source,conv_id,engine?,heuristic?} | 给一条记忆起名(D2;**机器起的名字同样上锁** = 名字已定,概述器不得覆盖;已锁行仍可再次起名;`heuristic:true` 走纯启发式)。`engine`:`auto`(默认,小助手优先、不可用则全局大模型)/ `assistant` / `global`,实际用的引擎与原因写回 `engine`/`note` | 写库旁路,不碰注入 |
+| GET `/assistant/config` | 小助手**生效地址与来源**(`settings` / `env` / `default`)+ 各级候选值 + 内置默认(S7;只读配置,**不做网络探测**,秒回) | 只读 |
+| POST `/assistant/config` body{baseUrl?,model?,clear?} | 写小助手地址/模型(S7;只接受这两个键,不开放任意设置写入;`baseUrl` 必须 `http(s)://` 开头,留空 = 回落下一级;`clear:true` 清空回默认) | 写 settings,不碰注入 |
+| POST `/assistant/test` body{baseUrl?,model?} | 探活(不改配置):返回 `ok` / `models` / 失败原因与排查提示;UI 的「测试连通」用它 | 只读(外呼一次) |
 | GET `/export` | 下载记忆包(§8) | 只读 |
 | POST `/import` (multipart) | 合并记忆包 | 只读(写库旁路,不碰注入) |
 | GET `/health` | 存活与版本 | — |

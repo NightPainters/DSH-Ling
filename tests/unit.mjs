@@ -218,11 +218,13 @@ await section('dsweb 扫描(增量,幂等)');
   eq(s2.refreshed, 2, '已有两条元数据刷新');
   eq(s2.total, 3, '库内 dsweb 共 3');
   // 幂等:summary/importance 用户态不被扫描覆盖
-  mem.upsertOverview({ source: 'dsweb', conv_id: 'c3', title: '买菜清单', category: 'daily', summary: '深摘或用户摘要', importance: 1.2, overview_ok: true });
+  // (G2,2026-09-17:置顶改用 setImportance 设置 —— upsertOverview 自 1.2.2 起不再覆盖本机用户态字段)
+  mem.upsertOverview({ source: 'dsweb', conv_id: 'c3', title: '买菜清单', category: 'daily', summary: '深摘或用户摘要', overview_ok: true });
+  mem.setImportance('dsweb', 'c3', 1);
   const s3 = scanIntoMemory(mem, srcPath);
   const row = mem.db.prepare("SELECT summary, importance FROM conv_overview WHERE source='dsweb' AND conv_id='c3'").get();
   eq(row.summary, '深摘或用户摘要', '扫描不覆盖本地 summary');
-  eq(Number(row.importance), 1.2, '扫描不覆盖本地 importance');
+  eq(Number(row.importance), 1, '扫描不覆盖本地 importance(置顶)');
   eq(s3.added, 0, '第三次无新增');
   let missing = false;
   try { readDswebRows(join(dir, 'nope.db')); } catch (e) { missing = true; }

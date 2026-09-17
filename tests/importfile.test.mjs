@@ -1,11 +1,11 @@
-﻿// 会话契约文件导入(ACCESS-DESIGN §1/§3)单元测试:两档深度/幂等/降级/坏行/auto-id
+// 会话契约文件导入(ACCESS-DESIGN §1/§3)单元测试:两档深度/幂等/降级/坏行/auto-id
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
-const { MemoryStore } = await imp('lib/host/memory.js');
+const { MemoryStore, rawSessionId } = await imp('lib/host/memory.js');
 const { normalizeImportItem, applyImportItems, IMPORT_SOURCE } = await imp('lib/host/import-file.js');
 
 const dir = mkdtempSync(join(tmpdir(), 'ling-imp-'));
@@ -50,18 +50,23 @@ const liteItem = { id: 'other:9', title: '深夜闲聊', startedAt: '2026-02-01T
 const lite2Item = { title: '买菜清单', startedAt: '2026-03-01T00:00:00Z' };
 const r1b = await applyImportItems(mem, [fullItem, liteItem, lite2Item, liteTitleOnly]);
 check(r1b.newRows === 4, '首次导入新增 4: ' + r1b.newRows);
-check(mem.rawTurnCount('webchat:100') === 3, '完整档 raw 写入 3 条');
+// G4(2026-09-17):导入原文落 'import:<id>' 命名空间,与 DSH 会话原文物理隔离
+const RAW100 = rawSessionId(IMPORT_SOURCE, 'webchat:100');
+check(mem.rawTurnCount(RAW100) === 3, '完整档 raw 写入 3 条(import 命名空间)');
+check(mem.rawTurnCount('webchat:100') === 0, '同名裸 id 下不留原文(不再被 DSH 概述器认领)');
 // 5) 重导:全刷新、raw 幂等、用户态 summary 不被覆盖
-mem.upsertOverview({ source: IMPORT_SOURCE, conv_id: 'webchat:100', title: '数据模拟', category: 'knowledge', overview_ok: true, summary: '用户深摘内容', importance: 1 });
+// (G2,2026-09-17:置顶经 setImportance 设置 —— upsertOverview 自 1.2.2 起不再覆盖本机用户态字段)
+mem.upsertOverview({ source: IMPORT_SOURCE, conv_id: 'webchat:100', title: '数据模拟', category: 'knowledge', overview_ok: true, summary: '用户深摘内容' });
+mem.setImportance(IMPORT_SOURCE, 'webchat:100', 1);
 const r2 = await applyImportItems(mem, [fullItem]);
 check(r2.newRows === 0 && r2.refreshed === 1, '重导刷新 1');
-check(mem.rawTurnCount('webchat:100') === 3, 'raw 覆盖写不翻倍');
+check(mem.rawTurnCount(RAW100) === 3, 'raw 覆盖写不翻倍');
 const row100 = mem.overviewById(IMPORT_SOURCE, 'webchat:100');
 check(row100.summary === '用户深摘内容', '已存在会话摘要不被覆盖');
 check(Number(row100.importance) === 1, '置顶不被覆盖');
 // 5b) 轻量行升级完整档 → upgraded(原无 raw,本次带原文)
 const upR = await applyImportItems(mem, [{ id: 'other:9', title: '深夜闲聊', startedAt: '2026-02-01T00:00:00Z', messages: [{ role: 'user', text: '最近睡得好吗' }, { role: 'assistant', text: '梦多但还好' }] }]);
-check(upR.refreshed === 1 && upR.upgraded === 1 && mem.rawTurnCount('other:9') === 2, '轻量→完整 补全原文计 upgraded(2 轮)');
+check(upR.refreshed === 1 && upR.upgraded === 1 && mem.rawTurnCount(rawSessionId(IMPORT_SOURCE, 'other:9')) === 2, '轻量→完整 补全原文计 upgraded(2 轮)');
 // 6) 混合批:好行入、坏行列入 rejected
 const r3 = await applyImportItems(mem, [{ id: 'x1', title: '新会话', startedAt: '2026-05-01T00:00:00Z' }, { bad: true }, 'nope']);
 check(r3.newRows === 1 && r3.rejected.length === 2, '混合批:1 新入 + 2 拒绝');
@@ -101,6 +106,53 @@ check(!mem.overviewById(IMPORT_SOURCE, 'uuid-aaaa'), 'import 域副本已删除'
 const dsRow = mem.overviewById('dsweb', 'uuid-aaaa');
 check(!!dsRow && dsRow.summary === '旧抓取摘要', 'dsweb 行摘要不被折叠覆盖');
 check(mem.rawTurnCount('uuid-aaaa') === 3, '原文 raw 写入 dsweb 会话');
+
+// 11) G4 读取侧:新数据走命名空间,旧数据(裸 id)保留回退 —— 老库不会因这次改动读不到原文
+const { buildTranscript, candidateFor, importRawTargets } = await imp('lib/host/deepsummary.js');
+mem.appendRawTurn('legacy:1', { seq: 1, role: 'user', ts: null, model: null, text: '旧版导入留下的裸 id 原文' });
+mem.appendRawTurn('legacy:1', { seq: 2, role: 'assistant', ts: null, model: null, text: '旧回复' });
+mem.upsertOverview({ conv_id: 'legacy:1', source: IMPORT_SOURCE, title: '旧数据', overview_ok: true });
+check(buildTranscript(mem, 'legacy:1', { source: IMPORT_SOURCE }).text.includes('裸 id 原文'), 'G4 回退:旧数据(裸 id)仍可转录');
+check(buildTranscript(mem, 'webchat:100', { source: IMPORT_SOURCE }).text.includes('数据模拟怎么做'), 'G4 主路径:新数据从 import 命名空间转录');
+check(candidateFor(mem, 'webchat:100').file === null, 'candidateFor 命中命名空间原文(不误判为"无原文")');
+const targets = importRawTargets(mem, { limit: 10 });
+check(targets.some((t) => t.session_id === 'webchat:100'), 'importRawTargets 返回 conv_id 而非行 id: ' + JSON.stringify(targets.map((t) => t.session_id)));
+check(targets.some((t) => t.session_id === 'legacy:1'), 'importRawTargets 兼容旧裸 id 行');
+
+// 12) S5 导入诚实化:ChatGPT 原生导出形态(author.role + content.parts + current_node 主链,无 root 键)
+const gptItem = {
+  id: 'gpt-1', title: '汽车冬季性能',
+  create_time: 1712345678.123,   // 秒级 epoch(旧实现当毫秒 → 1970)
+  update_time: 1712345800.5,
+  current_node: 'm3',
+  mapping: {
+    r: { id: 'r', message: null, parent: null, children: ['m1'] },
+    m1: { id: 'm1', parent: 'r', children: ['m2', 'm2b'], message: { author: { role: 'user' }, create_time: 1712345678.123, content: { content_type: 'text', parts: ['冬天电动车续航掉得厉害'] } } },
+    m2: { id: 'm2', parent: 'm1', children: ['m3'], message: { author: { role: 'assistant' }, create_time: 1712345700, content: { content_type: 'text', parts: ['主要看电池低温性能…'] } } },
+    m2b: { id: 'm2b', parent: 'm1', children: [], message: { author: { role: 'assistant' }, create_time: 1712345710, content: { content_type: 'text', parts: ['重生成的分支(不该入档)'] } } },
+    m3: { id: 'm3', parent: 'm2', children: [], message: { author: { role: 'user' }, create_time: 1712345800.5, content: { content_type: 'text', parts: ['那怎么保养'] } } },
+  },
+};
+const gpt = normalizeImportItem(gptItem);
+check(gpt.ok && gpt.rawTurns.length === 3, 'S5:ChatGPT mapping(无 root + parts)解析 3 轮: ' + (gpt.rawTurns || []).length);
+check(gpt.rawTurns[0].role === 'user' && gpt.rawTurns[1].role === 'assistant', 'S5:ChatGPT author.role 映射正确');
+check(!gpt.rawTurns.some((t) => t.text.includes('重生成的分支')), 'S5:current_node 主链回溯,重生成分支不入档');
+check(gpt.row.started_at === new Date(1712345678.123 * 1000).toISOString(), 'S5:秒级 create_time 归一到毫秒: ' + gpt.row.started_at);
+check(!gpt.degraded, 'S5:ChatGPT 导出非降级');
+check(gpt.row.conv_id === 'gpt-1', 'S5:顶层 id 正确');
+
+// 13) S5:认不出的 mapping 必须 degraded(旧实现静默报"导入完成"而正文零进)
+const alienItem = { id: 'alien:1', title: '异形导出', mapping: { n1: { id: 'n1', message: { payload: { text: '结构不认识' } } } } };
+const alien = normalizeImportItem(alienItem);
+check(alien.ok && alien.degraded === true, 'S5:mapping 解析 0 轮 → degraded(不再当成功)');
+check(/mapping/.test(alien.degradedReason || ''), 'S5:degraded 带原因: ' + alien.degradedReason);
+const alienR = await applyImportItems(mem, [alienItem]);
+check(alienR.degraded === 1 && alienR.degradedReasons && Object.keys(alienR.degradedReasons).length === 1,
+  'S5:applyImportItems 汇总 degradedReasons: ' + JSON.stringify(alienR.degradedReasons));
+
+// 14) S5:秒级时间双形态(顶层 create_time)
+const secOnly = normalizeImportItem({ id: 'epoch:1', title: '秒级时间', create_time: 1712345678 });
+check(!!secOnly.row.started_at && secOnly.row.started_at.startsWith('2024-'), 'S5:顶层秒级 create_time 归一: ' + secOnly.row.started_at);
 
 console.log(ok ? '契约文件导入 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

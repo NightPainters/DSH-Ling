@@ -166,5 +166,27 @@ const strictCands = scanCorrections(mem2);
 check(strictCands.length === 1 && strictCands[0].key === 'verbose', '4 次纠正跨 3 个会话 → 默认阈值下仍命中');
 check(strictCands[0].hits === 4 && strictCands[0].sessions === 3, `命中统计正确(4 次 / 3 会话),实得 ${strictCands[0].hits} 次 / ${strictCands[0].sessions} 会话`);
 
+// ── G4(2026-09-17):导入命名空间的原文不算"主人原话" ──
+// 旧行为:导入的他人对话躺在 dsh_turns_raw 裸 id 下,被习惯生成当主人的纠正信号/原话。
+const mem3 = new MemoryStore(join(dir, 'm3.db'));
+let seq3 = 0;
+const turn3 = (sid, role, text) => mem3.appendRawTurn(sid, { seq: ++seq3, role, ts: null, model: null, text });
+turn3('import:conv-w', 'user', '这是导入的他人对话:太啰嗦了');
+turn3('import:conv-x', 'user', '导入内容二:回答太长');
+turn3('import:conv-y', 'user', '导入内容三:废话太多');
+turn3('import:conv-z', 'user', '导入内容四:能不能短点');
+check(scanCorrections(mem3).length === 0, 'G4:导入(他人)对话里的"纠正"不算主人的习惯信号');
+const M3 = buildReflectMaterial(mem3, { scan: [] });
+check(M3.stats.turnTotal === 0, 'G4:原话轮次统计不含导入(实际 ' + M3.stats.turnTotal + ')');
+// 主人自己的会话照样参与
+turn3('own-1', 'user', '太啰嗦了,说重点');
+turn3('own-2', 'user', '回答太长');
+turn3('own-3', 'user', '废话太多');
+turn3('own-4', 'user', '能不能短点');
+const ownCands = scanCorrections(mem3);
+check(ownCands.length === 1 && ownCands[0].sessions === 4, 'G4:主人自己的 4 次跨 4 会话仍正常命中(sessions=' + (ownCands[0] && ownCands[0].sessions) + ')');
+const M4 = buildReflectMaterial(mem3, { scan: [] });
+check(M4.text.includes('太啰嗦了') && !M4.text.includes('导入的他人对话'), 'G4:回想材料只含主人原话,不含导入内容');
+
 console.log(ok ? '习惯生成器(A 数出来的 + B 想出来的)全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);
