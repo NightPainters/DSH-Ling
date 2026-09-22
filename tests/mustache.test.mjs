@@ -97,6 +97,25 @@ section('2) 出口① buildSnapshotText(L0 人格 + L1 记忆)');
   // 混合:两段同时带载荷
   const both = build([row({ title: '{{a}}', summary: '{{b}}' })], s2);
   ok(dangerous(both) === false, 'L0+L1 同时带载荷仍安全');
+
+  // B#9(2026-09-22 审计):渲染**不消费**注入感知水位 ——
+  // 推进由 inject.js 在"真正要开口"时做;否则 invalidateSession / refreshIdleSnapshot
+  // 这类"只重建、未开口"的路径会把主人刚改的东西标记成已读,真正注入时反而看不到。
+  let seenAfterId = null;
+  const kvWrites = [];
+  const memLog = {
+    kvGet: (k) => (k === 'branch_log_wm.sid-x' ? '3' : ''),
+    kvSet: (k, v) => { kvWrites.push([k, v]); },
+    bumpHit: () => {},
+    listOverviews: () => [],
+    sessionMeta: () => null,
+    branchLogDigest: (o) => { seenAfterId = o ? o.afterId : null; return { lines: ['把「甲」改名为「乙」'], maxId: 9 }; },
+  };
+  const built = buildSnapshotText(null, memLog, { get: () => S }, 'sid-x', { keywords: [] });
+  ok(seenAfterId === 3, '按会话读水位(branch_log_wm.<sessionId>=3),实际 ' + seenAfterId);
+  ok(built.logMaxId === 9, '返回 logMaxId 供 inject 推进,实际 ' + built.logMaxId);
+  ok(built.text.includes('主人刚改动了记忆树'), '改动段确实成文(否则前两条断言是空的)');
+  ok(kvWrites.length === 0, '渲染期间不写任何 kv,实际写了 ' + JSON.stringify(kvWrites));
 }
 
 // ---------------- 3) 出口② 源码护栏(时间锚与未来新增 part 的兜底) ----------------

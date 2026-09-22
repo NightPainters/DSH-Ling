@@ -142,5 +142,22 @@ check(db.clearConvBranch('dsweb', 'w2').removed === 1, '撤销覆盖');
 check(db.branchOfConv('dsweb', 'w2') === TRUNK_ID, '撤销后回到主干');
 check(db.queryOverviews({ branch: TRUNK_ID, limit: 500 }).items.some((i) => i.conv_id === 'w2'), '撤销后重新计入主干');
 
+// 9) B#9(2026-09-22 审计):注入感知水位**按会话**,afterId 优先于全局键。
+//    全局键的缺陷:会话 A 消费之后,会话 B 再也看不到同一批改动。
+db.logBranch(brA, 'rename', { before: '甲', after: '乙' });
+const d9a = db.branchLogDigest({ limit: 5, afterId: 0 });
+check(d9a.lines.length >= 1, 'afterId=0 → 看得到改动,实际 ' + d9a.lines.length);
+check(Number(d9a.maxId) > 0, 'maxId 为正,实际 ' + d9a.maxId);
+const wm9 = Number(d9a.maxId);
+check(db.branchLogDigest({ limit: 5, afterId: wm9 }).lines.length === 0, '水位之后的旧改动不再返回');
+db.logBranch(brA, 'weight', { before: '1', after: '1.5' });
+check(db.branchLogDigest({ limit: 5, afterId: wm9 }).lines.length === 1, '水位之后的新改动可见');
+// 关键隔离性:把全局键推到最前,显式 afterId 仍应看到全部(证明按会话而非全局)
+db.kvSet('branch_log_wm', String(db.branchLogDigest({ limit: 5, afterId: 0 }).maxId));
+check(
+  db.branchLogDigest({ limit: 5, afterId: 0 }).lines.length >= 2,
+  '全局键推进后,afterId=0 仍看得到全部(会话隔离)',
+);
+
 console.log(ok ? '记忆树(D9-b)全部通过 ✓' : '存在失败');
 process.exitCode = ok ? 0 : 1;
