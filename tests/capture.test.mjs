@@ -65,11 +65,33 @@ const check = (cond, msg) => { if (!cond) { ok = false; console.log('✗', msg);
   check(m._raw[2].text === '新消息', '增量文本正确');
 }
 
-// 4) 子代理跳过
+// 4) 子代理跳过;分叉会话入枝(D9-a 记忆分枝)
 {
   const m = fakeMemory();
-  const sess = { id: 'child', header: { parentSession: 'p1' }, snapshotEvents: () => [userMsg(1, 'x')] };
-  check(captureSessionDiff(m, sess) === 0, '子代理不入库');
+  // 真子代理:origin/delegationDepth 两式仍不入库
+  const sub = { id: 'sub1', header: { origin: 'subagent' }, snapshotEvents: () => [userMsg(1, 'x')] };
+  check(captureSessionDiff(m, sub) === 0, '子代理不入库');
+  const nested = { id: 'sub2', header: { delegationDepth: 1 }, snapshotEvents: () => [userMsg(1, 'x')] };
+  check(captureSessionDiff(m, nested) === 0, '嵌套委托不入库');
+
+  // D9-a:分叉会话(带 parentSession 但非子代理)是主人的并行工作线 —— 入自己的枝,不再被丢弃
+  const fork = {
+    id: 'br1', header: { parentSession: 'p1' },
+    snapshotEvents: () => [userMsg(1, 'a'), asstMsg(2, ['b'])],
+  };
+  check(captureSessionDiff(m, fork) === 2, '分叉会话入库到枝(D9-a),实际 ' + m._raw.length);
+
+  // D9-a:分叉会话从父会话继承来的 seed 前缀必须被 isOwnSeq 拦住(否则父会话历史会整段灌进枝)
+  const m2 = fakeMemory();
+  const seeded = {
+    id: 'br2', header: { parentSession: 'p1' },
+    inheritedEventCount: 100,
+    isOwnSeq: (seq) => Number(seq) >= 100,
+    snapshotEvents: () => [userMsg(1, '父会话里的旧话'), asstMsg(2, ['旧回复']), userMsg(101, '分叉之后的新话')],
+  };
+  const added = captureSessionDiff(m2, seeded);
+  check(added === 1, '分叉会话只收分叉后的新轮次,实际 ' + added);
+  check(m2._raw.length === 1 && m2._raw[0].text === '分叉之后的新话', 'seed 前缀未入库,枝里只有新内容');
 }
 
 // 5) 无 seq 安全跳过;null 会话返回 0
