@@ -11,8 +11,11 @@ const { MemoryStore } = await imp('lib/host/memory.js');
 const { rulesOf, habitsOf, habitsPendingOf } = await imp('lib/host/rules.js');
 const {
   registerLingTools, checkRuleAdd, checkHabitPropose, checkHabitResolve,
+  checkTreeRead, checkBranchEdit, checkForget, checkBackfill,
   RULE_ADD_SPEC, HABIT_PROPOSE_SPEC, HABIT_RESOLVE_SPEC,
-  TOOL_RULE_ADD, TOOL_HABIT_PROPOSE, TOOL_HABIT_RESOLVE,
+  TREE_READ_SPEC, BRANCH_EDIT_SPEC, MEMORY_FORGET_SPEC, MEMORY_BACKFILL_SPEC,
+  TOOL_RULE_ADD, TOOL_HABIT_PROPOSE, TOOL_HABIT_RESOLVE, TOOL_TREE_READ, TOOL_BRANCH_EDIT,
+  TOOL_MEMORY_FORGET, TOOL_MEMORY_BACKFILL,
 } = await imp('lib/host/tools.js');
 
 const dir = mkdtempSync(join(tmpdir(), 'ling-tools-'));
@@ -37,12 +40,49 @@ check(/不能直接写入/.test(HABIT_PROPOSE_SPEC.description), '习惯工具:�
 const src = await import('node:fs').then((m) => m.readFileSync(join(root, 'lib/host/tools.js'), 'utf8'));
 check(!/from ['"]@deepseek-ai\//.test(src), '工具模块不 import 任何 @deepseek-ai 包');
 
+// 2b) G1(Part G)树工具:参数自校验 —— 改结构必须给理由
+check(TREE_READ_SPEC.name === 'tree_read' && BRANCH_EDIT_SPEC.name === 'branch_edit', '树工具:名字');
+check(checkTreeRead({}).ok === true && checkTreeRead({}).action === 'tree', 'tree_read:默认 action=tree');
+check(checkTreeRead({ action: 'members' }).reason === 'no-id', 'tree_read:members 缺 id → no-id');
+check(checkTreeRead({ action: 'nope' }).reason === 'bad-action', 'tree_read:未知 action → bad-action');
+check(checkBranchEdit({ action: 'rename', id: 'br:x', name: 'B', reason: '太乱了整理' }).ok === true,
+  'branch_edit:改名通过');
+check(checkBranchEdit({ action: 'rename', id: 'br:x', name: 'B' }).reason === 'no-reason',
+  'branch_edit:缺理由 → no-reason(改动必须可审计)');
+check(checkBranchEdit({ action: 'create', name: 'A', reason: '整理一下' }).ok === true, 'branch_edit:建枝通过');
+check(checkBranchEdit({ action: 'create', reason: '整理一下' }).reason === 'empty-name',
+  'branch_edit:建枝缺名 → empty-name');
+check(checkBranchEdit({ action: 'link', id: 'a', reason: '有关联需要记下来' }).reason === 'no-id',
+  'branch_edit:连边缺 to → no-id');
+check(checkBranchEdit({ action: 'oops', reason: '整理一下' }).reason === 'bad-action',
+  'branch_edit:未知 action → bad-action');
+check(/只在主人明确要求/.test(BRANCH_EDIT_SPEC.description), 'branch_edit:描述里写明调用纪律');
+check(BRANCH_EDIT_SPEC.parameters.required.includes('reason'), 'branch_edit:reason 是必填参数');
+
+// 2c) G2(Part G)遗忘与回灌 —— **永远不做彻底删除**,目标与理由都必填
+check(MEMORY_FORGET_SPEC.name === 'memory_forget' && MEMORY_BACKFILL_SPEC.name === 'memory_backfill',
+  '遗忘/回灌:名字');
+check(checkForget({ action: 'forget', source: 'dsh', convId: 'c1', reason: '主人说别再提' }).ok === true,
+  'forget:目标+理由齐全 → 通过');
+check(checkForget({ action: 'forget', source: 'dsh', convId: 'c1' }).reason === 'no-reason',
+  'forget:缺理由 → no-reason(遗忘也要可审计)');
+check(checkForget({ action: 'forget', reason: '别再提了' }).reason === 'no-target', 'forget:缺目标 → no-target');
+check(checkForget({ action: 'list' }).ok === true && checkForget({ action: 'list' }).limit === 30,
+  'forget:list 不需要理由');
+check(checkBackfill({ action: 'restore', name: 'x' }).reason === 'no-reason', 'backfill:restore 缺理由 → no-reason');
+check(checkBackfill({ action: 'inspect' }).reason === 'no-name', 'backfill:inspect 缺归档名 → no-name');
+check(checkBackfill({}).ok === true && checkBackfill({}).action === 'list', 'backfill:默认 action=list');
+check(/永远不做彻底删除/.test(MEMORY_FORGET_SPEC.description), 'forget:描述写明不会彻底删除');
+check(/比遗忘更危险/.test(MEMORY_BACKFILL_SPEC.description), 'backfill:描述写明它更危险');
+
 // 3) 注册行为:可用 ctx / 假 tools 服务
 const registered = [];
 const fakeCtx = { tools: { register: (spec) => { registered.push(spec); return () => {}; } } };
 const r1 = registerLingTools(fakeCtx, { gate: { snapshotIds: () => [] }, memory: { kvSet: () => {} }, settings });
-check(r1.ok === true && registered.length === 3, '注册成功:三个工具');
-check(registered.map((s) => s.name).sort().join(',') === 'habit_propose,habit_resolve,rule_add', '注册的是这三个名字');
+check(r1.ok === true && registered.length === 7, '注册成功:七个工具(G1 加树工具,G2 加遗忘/回灌)');
+check(registered.map((s) => s.name).sort().join(',')
+  === 'branch_edit,habit_propose,habit_resolve,memory_backfill,memory_forget,rule_add,tree_read',
+  '注册的是这七个名字');
 const r2 = registerLingTools({ get: () => null }, { gate: null, memory: null, settings });
 check(r2.ok === false && r2.reason === 'no-tools', '无 tools 服务 → 优雅降级(不抛错)');
 
@@ -122,6 +162,63 @@ check(a5.ok === false && a5.reason === 'not-found', '我提的习惯:我无法�
 check(habitsOf(settings).every((h) => h.text !== '我自己觉得该多留白'), '自提习惯未被我自行收下');
 const a6 = await resolveTool.execute({ action: 'accept', id: mine.id }, {});
 check(a6.ok === false && a6.reason === 'not-awaiting', '显式指定 id 也不能绕过(not-awaiting)');
+
+// 2d) 实测报告(2026-09-24)七条缺陷的回归门 —— 每一条都先红过,再钉住
+const treeTool = reg2.find((s) => s.name === TOOL_TREE_READ);
+const editTool = reg2.find((s) => s.name === TOOL_BRANCH_EDIT);
+// E1:写入成功却回「失败」的根因是返回值里带 undefined(平台做**无损 JSON** 校验,含 undefined 即整次报失败)
+const hasUndef = (v, seen = new Set()) => {
+  if (v === null || typeof v !== 'object' || seen.has(v)) return false;
+  seen.add(v);
+  if (Array.isArray(v)) return v.some((x) => x === undefined || hasUndef(x, seen));
+  return Object.entries(v).some(([, x]) => x === undefined || hasUndef(x, seen));
+};
+const mkA = await editTool.execute({ action: 'create', name: '回归验证枝A', reason: '实测报告回归门' }, {});
+check(mkA.ok === true, 'branch_edit.create 成功');
+check(!hasUndef(mkA), 'E1:create 回执无 undefined(此前 weightScale:undefined 直接判失败)');
+const mkB = await editTool.execute({ action: 'create', name: '回归验证枝B', reason: '实测报告回归门' }, {});
+check(mkB.ok === true && !hasUndef(mkB), 'E1:第二个 create 回执同样干净');
+const linkR = await editTool.execute({ action: 'link', id: mkA.id, to: mkB.id, reason: '验证连边不再假失败' }, {});
+check(linkR.ok === true && !hasUndef(linkR), 'E1:link 回执 ok 且无 undefined(此前复现 3/3 假失败)');
+check(memReal.listVeinLinks().some((l) => l.from === mkA.id && l.to === mkB.id),
+  'E1:link 确实落库(回执与库一致 —— 这一条正是报告里"假失败诱使重发"的防线)');
+check(linkR.kind === 'related', 'E2:link 默认 kind=related');
+const linkR2 = await editTool.execute({ action: 'link', id: mkA.id, to: mkB.id, kind: 'prerequisite', reason: '改语义为前置' }, {});
+check(linkR2.ok === true && linkR2.kind === 'prerequisite', 'E2:link 可指定 kind=prerequisite');
+check(memReal.listVeinLinks().some((l) => l.from === mkA.id && l.to === mkB.id && l.kind === 'prerequisite'),
+  'E2:边类型真的落进 vein_link.kind(不再被压成 related 自由文本)');
+check(checkBranchEdit({ action: 'link', id: 'a', to: 'b', kind: 'nope', reason: '验证非法边型' }).reason === 'bad-link-kind',
+  'E2:非法边 kind → bad-link-kind');
+check(checkBranchEdit({ action: 'create', name: 'A', kind: 'nope', reason: '验证非法枝型' }).reason === 'bad-kind',
+  'E2:非法枝 kind 仍是 bad-kind(两用 kind 按 action 分流)');
+
+// E3 + B4:树概览要出短 id 与连边
+const treeR = await treeTool.execute({ action: 'tree' }, {});
+check(treeR.ok === true && (treeR.lines || []).some((l) => l.includes('回归验证枝A')), 'tree:列出新建的枝');
+check((treeR.lines || []).some((l) => /｜[0-9a-f]{8}$/.test(l)), 'B4:概览行尾带短 id(不必再另找办法拿 id)');
+check(Array.isArray(treeR.links) && treeR.links.length >= 1, 'E3:tree 回传连边(连边动作从此可自查)');
+check(!hasUndef(treeR), 'E1:tree 回执无 undefined');
+
+// B2:传枝名当 id → no-match(此前静默回「0 条会话(暂无)」,看起来就像空枝)
+const byName = await treeTool.execute({ action: 'members', id: '回归验证枝A' }, {});
+check(byName.ok === false && byName.reason === 'no-match', 'B2:传枝名 → no-match,不再静默 0 条');
+// B3:limit 生效(此前写死 slice(0,40))
+const memR3 = await treeTool.execute({ action: 'members', id: mkA.id, limit: 5 }, {});
+check(memR3.ok === true && (memR3.members || []).length <= 5, 'B3:members 遵守 limit');
+check(Number.isFinite(Number(memR3.shown)), 'B3:members 回执带 shown(截断可被显式说明)');
+// B1:计数的取法必须落在 .members 那一层(实测报告定位到的根因)
+const bcR = memReal.branchMemberCounts();
+check(bcR && bcR.members !== undefined, 'B1:branchMemberCounts() 的 per-branch 计数确实在 .members');
+check(/branchMemberCounts\(\) \|\| \{\}\)\.members/.test(src), 'B1 护栏:treeLines 从 .members 取计数(防改回恒 0)');
+check(/function lossless/.test(src) && /return lossless\(await fn/.test(src), 'E1 护栏:guard 统一过 lossless()');
+check(/const LINK_KINDS/.test(src), 'E2 护栏:边类型白名单存在');
+
+// 收尾:拆掉回归用的两条枝,不给库留垃圾
+await editTool.execute({ action: 'unlink', id: mkA.id, to: mkB.id, reason: '回归验证收尾' }, {});
+await editTool.execute({ action: 'delete', id: mkB.id, reason: '回归验证收尾清理' }, {});
+await editTool.execute({ action: 'delete', id: mkA.id, reason: '回归验证收尾清理' }, {});
+check(!memReal.listBranches().some((b) => b.name === '回归验证枝A' || b.name === '回归验证枝B'),
+  '收尾:回归用的枝已清干净');
 
 console.log(ok ? '会话内工具 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);
