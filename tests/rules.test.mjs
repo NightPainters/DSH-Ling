@@ -59,14 +59,16 @@ check(r.ok === false && r.reason === 'already-pending', '重复提议被拒');
 // 7) 注入面:未确认的提议**不出现**;确认后才出现
 let text = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, ...settings.get().persona } }, 'work');
 check(!text.includes('先接住情绪再谈事'), '未确认的习惯不进注入面');
-check(text.includes('[习惯](你自己长的,新增需用户确认)') === false || !text.includes('先接住情绪'), '习惯段未泄露未确认项');
+check(text.includes('[习惯]') === false || !text.includes('先接住情绪'), '习惯段未泄露未确认项');
 
 const pendingId = R.habitsPendingOf(settings)[0].id;
 r = await R.resolveHabit({ settings, id: pendingId, action: 'confirm', now: 1700000002000 });
 check(r.ok && R.habitsOf(settings).length === 1, '确认后落地为习惯:' + JSON.stringify(r));
 text = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, ...settings.get().persona } }, 'work');
 check(text.includes('先接住情绪再谈事'), '已确认习惯出现在注入面');
-check(text.includes('[习惯](你自己长的,新增需用户确认)'), '习惯段头写明"需用户确认"');
+// 契约变更(1.5.1):注入面段头去掉元描述括号,固定为纯标签 [习惯] / [规矩]
+//   —— 括号里是写给主人看的说明,不该进模型上下文;「可直接追加」还会被模型误读成授权指令。
+check(text.includes('[习惯]'), '习惯段头为纯标签 [习惯](不再带元描述)');
 
 // 8) 驳回:清 pending,不留习惯
 await R.proposeHabit({ settings, habit: '不要主动提建议', evidence: '一次' });
@@ -84,7 +86,8 @@ check(r.ok === false, '非法 action 被拒');
 
 // 10) 规矩段头语义 + 旧档案兼容(只有 hardRules 的旧设置也能注入)
 const legacy = assemblePersona({ ...DEFAULT_SETTINGS, persona: { ...DEFAULT_SETTINGS.persona, hardRules: ['讲话别太晦涩'] } }, 'work');
-check(legacy.includes('[规矩](用户的指令,可直接追加)') && legacy.includes('- 讲话别太晦涩'), '旧 hardRules 兼容为规矩');
+// 同上契约变更:旧串 '[规矩](用户的指令,可直接追加)' 已作废(1.5.1),段头固定为 [规矩]
+check(legacy.includes('[规矩]') && !legacy.includes('用户的指令') && legacy.includes('- 讲话别太晦涩'), '旧 hardRules 兼容为规矩(纯标签段头)');
 
 // 11) 用户也能提议习惯(byUser),仍须确认才落地
 r = await R.proposeHabit({ settings, habit: '少用感叹号', evidence: '用户提议', byUser: true });

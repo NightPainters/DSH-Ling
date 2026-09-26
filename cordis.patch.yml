@@ -1,8 +1,16 @@
 # dsh-ling bundle patch: 器灵 · 记忆与人格助手
-# 注册行:loader id 必须等于包名(dsh-ling);HMR live 热载后浏览器硬刷即可看到 client 模块。
+# 注册行:`id` 是身份键(Loader 用它折叠与覆盖,**不要改**);`name` 必须是 **npm 包名** ——
+#        它就是被 import 的模块说明符,所以这里必须是 `@nightpainters/dsh-ling`
+#        (npm 上 `dsh-ling` 已被他人占用)。
+#        ⚠️ 逐字比对的是【`lib/client.js` 自报的注册 id】与【包名】,**不是这里的 `name`**。
+#        bundle 顶部 `window.__ModuleLoader__.load({ id: … })` 的 id 必须等于 package.json 的 name;
+#        不符时客户端判定"该 row 没到货",会回退去取单资源 URL 把同一份字节**再执行一遍**,
+#        第二次注册抛 `duplicate factory registration` ⇒ 前端整片黑屏(2026-09-26 实测两次)。
+#        ⇒ 改包名时 `lib/client.js` 必须同批改;`tests/unit.mjs` 已加断言守着。
+#        HMR live 热载后浏览器硬刷即可看到 client 模块。
 - insert:
     - id: dsh-ling
-      name: 'dsh-ling'
+      name: '@nightpainters/dsh-ling'
       # config(可选,覆盖默认值):
       #   dataDir: 覆盖数据目录(默认 $DSH_HOME/cache/dsh-ling)
       #   injectEnabled: false  # 完全关闭系统提示注入(逃生开关)

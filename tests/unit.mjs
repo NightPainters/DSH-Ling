@@ -65,8 +65,8 @@ await section('persona 组装');
   ok(!fish.includes('存身于'), '注入面不再重复平台名(瘦身)');
   ok(fish.includes('你称用户为"老板"'), '称呼生效');
   ok(!fish.includes('铁律'), '不再出现 铁律 措辞');
-  ok(fish.includes('底线:') && fish.includes('绝不编造历史记忆'), '底线段生效(在规矩前)');
-  ok(fish.indexOf('底线:') < fish.indexOf('[规矩]'), '底线在规矩之前');
+  ok(fish.includes('[底线]') && fish.includes('绝不编造历史记忆'), '底线段生效(在规矩前)');
+  ok(fish.indexOf('[底线]') >= 0 && fish.indexOf('[底线]') < fish.indexOf('[规矩]'), '底线在规矩之前');
   ok(fish.includes('[规矩]') && fish.includes('引用历史记忆必须注明出处'), '规矩段生效');
   ok(fish.includes('[设定]') && fish.includes('2025 年初'), 'extraLore 生效');
   ok(fish.includes('[生活模式]'), '模式风格块生效');
@@ -277,6 +277,14 @@ await section('client 契约形状 + apply 桩');
 {
   const src = readFileSync(join(root, 'lib/client.js'), 'utf8');
   ok(src.includes('window.__ModuleLoader__.load'), 'client 经 ModuleLoader 装载');
+  // 注册 id 必须逐字等于包名:客户端模块表以包名为 row id,不符时系统会回退重取并二次执行同一份字节,
+  // 第二次注册撞去重守卫 ⇒ 整片前端黑屏(2026-09-26 改名事故的根因,实测踩中两次)。
+  {
+    const pkgName = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name;
+    const m = src.match(/__ModuleLoader__\s*\.\s*load\(\{\s*id:\s*(['"])([^'"]+)\1/);
+    ok(!!m, 'client 的 ModuleLoader.load 带字符串字面量 id');
+    eq(m && m[2], pkgName, 'client 注册 id 与 package.json 的 name 逐字一致');
+  }
   // 最小 DOM/fetch 桩环境
   const elStub = () => ({
     style: {}, dataset: {}, children: [], textContent: '', className: '', id: '',

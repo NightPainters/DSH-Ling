@@ -25,7 +25,7 @@ check(stripPreamble('哈喽器灵~ 今天做什么') === '今天做什么', '剥
 // ---- 2) 无信息量首句判定 ----
 check(isVagueTitle('你好') === true, '「你好」= 无信息量');
 check(isVagueTitle('下午好') === true, '「下午好」= 无信息量');
-check(isVagueTitle('已测试聊天') === true, '「已测试聊天」= 无信息量');
+check(isVagueTitle('已测试对话') === true, '「已测试对话」= 无信息量');
 check(isVagueTitle('UI测试，回复数字2') === true, '「UI测试…」= 无信息量');
 check(isVagueTitle('现在你有计算器插件吗？没有的话挑一个装上') === false, '实质问句 ≠ 无信息量');
 

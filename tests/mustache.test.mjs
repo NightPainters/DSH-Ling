@@ -114,7 +114,7 @@ section('2) 出口① buildSnapshotText(L0 人格 + L1 记忆)');
   const built = buildSnapshotText(null, memLog, { get: () => S }, 'sid-x', { keywords: [] });
   ok(seenAfterId === 3, '按会话读水位(branch_log_wm.<sessionId>=3),实际 ' + seenAfterId);
   ok(built.logMaxId === 9, '返回 logMaxId 供 inject 推进,实际 ' + built.logMaxId);
-  ok(built.text.includes('主人刚改动了记忆树'), '改动段确实成文(否则前两条断言是空的)');
+  ok(built.text.includes('记忆树有改动'), '改动段确实成文(否则前两条断言是空的)');
   ok(kvWrites.length === 0, '渲染期间不写任何 kv,实际写了 ' + JSON.stringify(kvWrites));
 }
 
