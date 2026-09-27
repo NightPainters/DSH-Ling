@@ -123,9 +123,13 @@ check(Object.keys(sanitizePersonaPatch({ persona: 'not-an-object' }).clean).leng
 check(Object.keys(sanitizePersonaPatch(null).clean).length === 0 && Object.keys(sanitizePersonaPatch([1, 2]).clean).length === 0,
   'null / 数组补丁不写入');
 // 完整性:客户端 collect() 与实际服务端调用点用到的每个键都必须被保留(否则是功能回退,不是加固)
-const clientKeys = ['enabled', 'userTitle', 'aiName', 'aiTitle', 'pronoun', 'tone', 'toneWork', 'toneLife', 'language', 'hardRules', 'bottomLines', 'extraLore'];
+const clientKeys = ['enabled', 'userTitle', 'aiName', 'aiTitle', 'pronoun', 'tone', 'toneWork', 'toneLife', 'language', 'hardRules', 'bottomLines', 'extraLore', 'duty'];
 const kept = sanitizePersonaPatch({ persona: Object.fromEntries(clientKeys.map((k) => [k, 'v'])) }).clean.persona;
-check(clientKeys.every((k) => k in kept), '客户端 collect() 的全部 12 个字段都被白名单保留(不误杀功能)');
+check(clientKeys.every((k) => k in kept), '客户端 collect() 的全部 13 个字段都被白名单保留(不误杀功能)');
+// ⚠️ 计数与数组必须同批改:上面那句 every() 只遍历数组,漏了键它照样绿 —— 只有这行会把数字钉住。
+//    (2026-09-27 加 duty 时的真实教训:数组与文案不同批改 ⇒ 测试继续通过但文案开始说谎。)
+check(PERSONA_PATCH_KEYS.filter((k) => clientKeys.includes(k)).length === clientKeys.length,
+  '文案里的字段数与 clientKeys 实际长度一致(' + clientKeys.length + ' 个)');
 const srvKeys = ['ruleMeta', 'habits', 'habitsPending', 'sealed', 'sealPhrase', 'aiTitle'];
 check(srvKeys.every((k) => PERSONA_PATCH_KEYS.includes(k)), '服务端/工具会写的字段(规矩元数据、习惯、定型、自述)都在白名单内');
 check(STYLE_PATCH_KEYS.length === 2 && STYLE_PATCH_KEYS.includes('work') && STYLE_PATCH_KEYS.includes('life'), 'styles 白名单 = work / life');

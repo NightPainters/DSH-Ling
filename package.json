@@ -1,6 +1,6 @@
 {
   "name": "@nightpainters/dsh-ling",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:三层记忆、从历史里长出来的人格档案、定型锁与自由生长",
   "type": "module",
   "main": "./lib/index.js",
@@ -24,7 +24,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node tests/unit.mjs && node tests/access-log.test.mjs && node tests/archive.test.mjs && node tests/autotree.test.mjs && node tests/backfill.test.mjs && node tests/branch.test.mjs && node tests/assistant.test.mjs && node tests/capture.test.mjs && node tests/clock.test.mjs && node tests/clock-skill.test.mjs && node tests/deep.test.mjs && node tests/dswebsum.test.mjs && node tests/export.test.mjs && node tests/feedback.test.mjs && node tests/forget-backfill.test.mjs && node tests/genesis.test.mjs && node tests/guard.test.mjs && node tests/habitgen.test.mjs && node tests/idle.test.mjs && node tests/importfile.test.mjs && node tests/importlog.test.mjs && node tests/l1lines.test.mjs && node tests/memories.test.mjs && node tests/mode.test.mjs && node tests/mustache.test.mjs && node tests/retitle.test.mjs && node tests/rules.test.mjs && node tests/suggest.test.mjs && node tests/summarize.test.mjs && node tests/times.test.mjs && node tests/tone.test.mjs && node tests/tools.test.mjs && node tests/tree.test.mjs && node tests/patch-spec.test.mjs",
+    "test": "node tests/unit.mjs && node tests/access-log.test.mjs && node tests/archive.test.mjs && node tests/autotree.test.mjs && node tests/backfill.test.mjs && node tests/branch.test.mjs && node tests/assistant.test.mjs && node tests/capture.test.mjs && node tests/clock.test.mjs && node tests/clock-skill.test.mjs && node tests/deep.test.mjs && node tests/dswebsum.test.mjs && node tests/duty.test.mjs && node tests/export.test.mjs && node tests/feedback.test.mjs && node tests/forget-backfill.test.mjs && node tests/genesis.test.mjs && node tests/guard.test.mjs && node tests/habitgen.test.mjs && node tests/idle.test.mjs && node tests/importfile.test.mjs && node tests/importlog.test.mjs && node tests/l1lines.test.mjs && node tests/memories.test.mjs && node tests/mode.test.mjs && node tests/mustache.test.mjs && node tests/retitle.test.mjs && node tests/rules.test.mjs && node tests/sessionline.test.mjs && node tests/suggest.test.mjs && node tests/summarize.test.mjs && node tests/times.test.mjs && node tests/tone.test.mjs && node tests/tools.test.mjs && node tests/tree.test.mjs && node tests/patch-spec.test.mjs",
     "check": "node tools/check-install.mjs",
     "check:publish": "node tools/check-publish.mjs"
   },
@@ -51,16 +51,63 @@
   "engines": {
     "node": ">=22.5.0"
   },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.4",
+    "@deepseek-ai/dsh-agent-default-model": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-store": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-skill": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": ">=0.1.7-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent-default-model": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-session-controller": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-locale": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-store": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-skill": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-store",
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-api-session-controller"
       ],
       "platform": "web"

@@ -39,6 +39,41 @@ check(p.observations === '观察一。观察二。', 'observations 原样');
 const empty = parseGenesisResult('乱七八糟');
 check(!empty.self_intros.length && !empty.name_pairs.length, '不可解析 → 空结果');
 
+// 2b) 第 5 键 duties(1.5.2 I-5):解析 / 清洗 / 空值容忍
+//     口径:每条 5~120 字、≤3 条、行内换行折成空格(防止借换行伪造段结构)
+const rawDuty = {
+  self_intros: [],
+  name_pairs: [],
+  duties: [
+    '我承担陪你熬夜的那部分。',                       // 正常
+    '我擅长\n把乱麻\n理成三条。',                     // 换行必须折成空格,否则在 [承担] 里会伪造出多行结构
+    '无',                                             // 5 字下限:噪声应被丢
+    '   ',                                            // 纯空白应被丢
+    '好'.repeat(200),                                 // 120 字上限:超长应被丢(不是截断)
+    '第四五六条应当被条数上限裁掉,这一条足够长。',
+  ],
+  tone_advice: '', observations: '',
+};
+const pd = parseGenesisResult(JSON.stringify(rawDuty));
+// 先过滤(下限/上限丢噪声)再截条数 ⇒ 幸存 3 条:前两条正常,第三条是"够长的第 4 条"
+check(pd.duties.length === 3, 'duties 条数上限 3(先滤长度再截条数): ' + JSON.stringify(pd.duties));
+check(pd.duties[0] === '我承担陪你熬夜的那部分。', 'duties 保序');
+check(pd.duties[1] === '我擅长 把乱麻 理成三条。', 'duties 行内换行折成单空格: ' + JSON.stringify(pd.duties[1]));
+check(!pd.duties.includes('无') && !pd.duties.includes('   ') && !pd.duties.some((d) => d.length > 120),
+  'duties 丢掉 <5 字的噪声与 >120 字的超长项');
+check(!pd.duties.some((d) => d.includes('\n')), 'duties 里不留换行(不给它在 [承担] 段里造第二条的机会)');
+check(pd.duties.every((d) => d.length >= 5 && d.length <= 120), 'duties 每条都在 5~120 字内');
+check(pd.duties[2] === '第四五六条应当被条数上限裁掉,这一条足够长。', '条数截断落在"最先出现的前 3 条"上(不是末尾 3 条)');
+// 空值容忍:老模型输出(无 duties 键)/ duties 不是数组 / 空数组,都必须是 [] 而不是 undefined
+check(Array.isArray(parseGenesisResult(JSON.stringify({ self_intros: [], name_pairs: [] })).duties)
+  && parseGenesisResult(JSON.stringify({ self_intros: [], name_pairs: [] })).duties.length === 0,
+  'duties 缺键 → 空数组(老契约的模型输出不炸)');
+check(parseGenesisResult(JSON.stringify({ duties: '我承担某事' })).duties.length === 0, 'duties 非数组 → 空数组');
+check(parseGenesisResult(JSON.stringify({ duties: [] })).duties.length === 0, 'duties 空数组 → 空数组');
+check(parseGenesisResult('不是 JSON').duties.length === 0, 'duties 不可解析 → 空数组');
+check(parseGenesisResult(JSON.stringify({ duties: ['我承担陪着你的那部分,不写别的。'] })).duties.length === 1,
+  '只给 duties 也能被解析出来(与 self_intros/name_pairs 独立)');
+
 // 3) 原料组装与截断(保头)
 const src = buildGenesisSource([
   { title: '会话甲', summary: '甲摘要内容' },

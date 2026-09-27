@@ -285,6 +285,25 @@ await section('client 契约形状 + apply 桩');
     ok(!!m, 'client 的 ModuleLoader.load 带字符串字面量 id');
     eq(m && m[2], pkgName, 'client 注册 id 与 package.json 的 name 逐字一致');
   }
+  // ---------------------------------------------------------------- /state 轮询契约(2026-09-27 补)
+  // 背景:该端点曾吃掉全部请求的 96.8%(全天 46,392 次;后端每次 24.2ms 同步阻塞,
+  // 折合每天约 18.8 分钟卡在宿主单线程上)。三条节流必须同时在场;任何一条被后来的
+  // 改动拿掉,这里就要红。⚠️ 下面的数字是**故意留的绊线** —— 调参时请连断言一起改,
+  // 而不是把断言删掉。
+  {
+    // B) 切后台整条停表
+    ok(src.includes('document.hidden'), '轮询器带 document.hidden 判据(切后台停表)');
+    // A) 空闲降频
+    ok(/POLL_SLOW_MS\s*=\s*5000/.test(src), '空闲降频节拍在场');
+    ok(src.includes('POLL_IDLE_STRIKES'), '空闲连续拍计数在场');
+    // A-1) 共享 ticker:按 store 分键,不再是「每个组件实例一个定时器」
+    ok(src.includes('function subscribePoll('), '存在共享订阅入口 subscribePoll');
+    ok(src.includes('pollers.length'), '存在模块级 poller 注册表');
+    // C) 全局默认那条固定 30s;且挂载即补一拍(否则侧栏那个按钮在页面加载后空 30 秒)
+    ok(/POLL_GLOBAL_MS\s*=\s*30000/.test(src), '全局默认 ticker 的 30s 节拍在场');
+    ok(src.includes('isGlobalPoll(rec) ? POLL_GLOBAL_MS'), '排表时全局那条走 30s 分支');
+    ok(src.includes('if (isGlobalPoll(rec)) pollTick(rec);'), '全局那条挂载即补一拍');
+  }
   // 最小 DOM/fetch 桩环境
   const elStub = () => ({
     style: {}, dataset: {}, children: [], textContent: '', className: '', id: '',

@@ -5,7 +5,7 @@
 // 用法:
 //   node tools/check-install.mjs                 # 自检(只读)
 //   node tools/check-install.mjs --fix           # 若发现是复制副本 → 备份并重挂 junction
-//   node tools/check-install.mjs --profile <dir> # 指定 profile(默认 web)
+//   node tools/check-install.mjs --profile <dir> # 指定 profile(默认 $DSH_HOME/profiles/web;DSH_HOME 缺省 ~/.dsh)
 import { existsSync, lstatSync, readlinkSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -15,7 +15,11 @@ import { fileURLToPath } from 'node:url';
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..').replace(/\\/g, '/');
 const args = process.argv.slice(2);
 const g = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const PROFILE = g('profile', join(homedir(), '.dsh/profiles/web')).replace(/\\/g, '/');
+// DSH 家目录(1.5.2 U10):`--profile` 与下面第 3 段的**数据目录**必须同一来源。
+// 原来这里写死 `~/.dsh`,DSH_HOME 指到别处的部署会被自检成"插件未安装"(假警报),
+// 而同一个脚本的数据目录那段却已经读了 DSH_HOME —— 两处口径不一致,这里对齐到后者。
+const HOME = (process.env.DSH_HOME || join(homedir(), '.dsh')).replace(/\\/g, '/');
+const PROFILE = g('profile', join(HOME, 'profiles/web')).replace(/\\/g, '/');
 const FIX = args.includes('--fix');
 // 包名(发布名 @nightpainters/dsh-ling):2026-09-26 改名后,旧名 `dsh-ling` 的 junction **已删**,
 // 现在只剩别名这一条入口;两个名字仍都认 —— 只认新名会把"装了旧名的部署"误报成"未安装",
@@ -130,8 +134,7 @@ if (enabledVia) {
     : `cordis.patch.yml 与 profile 的 dsh.profile.bundles 里都没有 dsh-ling —— 插件不会被加载(在 profile/package.json 的 dsh.profile.bundles 追加 "dsh-ling",或在 cordis.patch.yml 追加 {id: dsh-ling, name: 'dsh-ling'})`);
 }
 
-// 3) 数据目录
-const HOME = (process.env.DSH_HOME || join(homedir(), '.dsh')).replace(/\\/g, '/');
+// 3) 数据目录(HOME 见文件头 —— 与 --profile 同源,勿再各写一份)
 const dataDir = join(HOME, 'cache', 'dsh-ling');
 for (const f of ['settings.json', 'memory.db']) {
   const p = join(dataDir, f);

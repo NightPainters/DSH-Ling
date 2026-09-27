@@ -37,6 +37,23 @@ const CONTENT_PATTERNS = [
   [/\bghp_[A-Za-z0-9]{20,}/, '疑似 GitHub Token'],
   [/\bAIza[0-9A-Za-z_\-]{20,}/, '疑似 Google API Key'],
 ];
+// 2b) 真机绝对路径(**硬拦**,计入 problems ⇒ 退出码 1)。上面那两条只认 `<盘符>:\Users\…` 与
+//     `/Users|/home/…`,**非 Users 的盘符路径**(盘符 + 真实目录名 + 真实文件名,例如作者本机的
+//     项目/文档目录)每次都静默通过。2026-09-27 实测:一个同时含三条「盘符 + 三层目录 + 文件名」
+//     的样本,旧判据只报出含用户名的那一行,另两条判「✓ 干净」。
+//     为什么是硬拦而不是"请人工确认":盘符绝对路径不是"疑似",它就是作者本机目录结构本身;
+//     而且判据已收窄到不会命中合法字面量(见下),误报为 0 才敢硬拦。
+//     口径 = 盘符 + ≥3 层目录,每层以 [A-Za-z0-9_] 开头 ⇒ 2026-09-27 全树实测的 8 处合法字面量
+//     全部放过(逐处:DESIGN.md:222(那条 `pnpm add file:<仓库路径>` 安装步骤,句内自带"文中盘符路径均为作者本机路径、按实际替换"的说明)· lib/host/api.js:1357(JS 转义样本 `'A:\n'`,不是路径)· lib/host/retitle.js:52,53(两个中文目录名样本:`<盘符>:\某工作目录\license` 与 `<盘符>:\某目录\某前缀`)·
+//     tests/feedback.test.mjs:67(`cwd: '<盘符>:\\daily'`,只有一层,层数不足)· tools/apply-access-log-patch.mjs:16(`--dsh-root "<盘符>:\path\to\@deepseek-ai\dsh"` 那句占位路径)· tools/apply-access-log-patch.mjs:61(`<盘符>:\Program Files`,含空格且只有一层)· tools/check-peers.mjs:38(那行 `--dsh-root "<盘符>:\…"` 的占位路径))。
+//     放过的原因:省略号/空格/`@` 开头的那一层不成立(占位写法)、层数不足(单层或中文目录名)、
+//     以及 JS 字符串转义(形如 `A:\n`)根本不是路径。
+//     ⚠ 本段注释自身也在扫描范围内:示例一律用 `<盘符>:\<目录>\…` 占位,别写成真的作者路径 ——
+//     否则判据会命中它自己,或又把本机目录结构写进这个同样公开的文件。
+//     前置 (?<![A-Za-z0-9]) 不可省:否则 `http://a/b/c` 会被当成 `p:` 开头的盘符路径。
+const HARD_CONTENT_PATTERNS = [
+  [/(?<![A-Za-z0-9])[A-Za-z]:[\\/]{1,2}(?:[A-Za-z0-9_][^\\/\s"']*[\\/]{1,2}){2,}[A-Za-z0-9_][^\\/\s"']*/, '真机绝对路径(盘符 + 3 层以上目录,疑似作者本机目录结构)'],
+];
 const MAX_BYTES = 5 * 1024 * 1024; // 单文件超过 5MB 值得人工确认
 
 const problems = [];
@@ -73,6 +90,10 @@ function walk(dir) {
       const m = text.match(re);
       if (m) warnings.push(`${rel} —— ${why}:${String(m[0]).slice(0, 40)}`);
     }
+    for (const [re, why] of HARD_CONTENT_PATTERNS) {
+      const m = text.match(re);
+      if (m) problems.push(`${rel} —— ${why}:${String(m[0]).slice(0, 40)}`);
+    }
   }
 }
 
@@ -82,7 +103,7 @@ walk(REPO);
 // 机制:客户端模块表以「包名」为 row id(dsh-client-modules/lib/index.js:884 graphRow(packageName,…)),
 // 而 bundle 的注册 id 是脚本自报的;两者不符时客户端判"该 row 没到货",会回退去取单资源 URL
 // 把同一份字节再执行一遍,第二次注册抛 `duplicate factory registration for "…"` ⇒
-// `web boot: 1 entry did not activate` ⇒ 前端整片黑屏。本脚本由 release\publish-sync.mjs 在
+// `web boot: 1 entry did not activate` ⇒ 前端整片黑屏。本脚本由同步脚本在
 // dry-run 里调用、失败即 die ⇒ 接进去零额外接线。注意:加载器只认 exports["./client"],
 // 补 dsh.client 的入口字段是无效配置(loader 不读)。
 const readFileSyncSafe = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } };

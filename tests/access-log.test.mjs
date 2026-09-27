@@ -4,7 +4,7 @@
 // 真实四态请求由实测脚本(带真实服务器)覆盖 —— 单测替代不了实测,这是 E4 的教训本身。
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 
@@ -14,7 +14,7 @@ const {
   createAccessLog, localIso, localDay, rejectionReason, deviceIdFromCookieValue,
   deviceIdDigest, DEVICE_ID_HASH, POSTURE_PROBE_PATH,
 } = await imp('lib/audit/access-log.js');
-const { PATCH_TARGETS, PATCH_MARKER, OBSERVE_GLOBAL, UPGRADE_GLOBAL } = await imp('lib/audit/patch-spec.js');
+const { PATCH_TARGETS, PATCH_MARKER, PATCH_STATE_FILE, OBSERVE_GLOBAL, UPGRADE_GLOBAL } = await imp('lib/audit/patch-spec.js');
 
 let ok = true;
 const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
@@ -286,6 +286,352 @@ const disposeLog = installAccessLog({}, { dir: healthDir, degradeWarnMs: 0 });
 check(accessLogHealth()?.health?.state === 'ok', 'C-07:安装后健康面可读且为 ok:' + JSON.stringify(accessLogHealth()?.health));
 disposeLog();
 check(accessLogHealth() === null, 'C-07:卸载后健康面归 null(不留悬空引用)');
+
+// ---- 9b) **契约字段名绊线**(2026-09-27,主会话追加)—— 这 11 个名字是跨文件契约,不是内部细节 ----
+// 消费端(读的键就这几个,少一个不会报错、只会显示错):
+//   · lib/client.js:953-962 渲染审计面板那一行:state 三分支 + lastError.code / message / at + lost / writes
+//   · lib/client.js:3907    侧栏常驻警示:`st.audit.state === 'degraded'`
+//   · lib/host/api.js:482   把 `accessLogHealth().health` **原样** sendJson(/health 与两个视图的 audit 字段)
+// 为什么必须逐名钉死:前端对**未知 / 缺失**字段**不抛错** —— 改个名不会红,只会让面板静悄悄显示
+// 「访问日志: ✔ 正常 · 写入 undefined」,那等于把"坏了"伪装成"正常",比不显示更坏。
+// 所以:名字缺一个,这里就红(而不是等到有人在界面上肉眼发现)。
+const HEALTH_KEYS = [
+  'state', 'writes', 'failures', 'lost', 'lostSince', 'lastError', 'warnedAt',
+  'recoveredAt', 'retryAttempts', 'nextRetryAt', 'retrySucceeded',
+];
+const hasKey = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
+const hOk = log.info().health;      // 正常姿态
+const hDeg = broken.info().health;  // 降级姿态(唯一会带 lastError 的形态)
+const hOff = off.info().health;     // 配置关闭姿态
+for (const k of HEALTH_KEYS) {
+  const missing = [['ok', hOk], ['degraded', hDeg], ['off', hOff]]
+    .filter(([, h]) => !hasKey(h, k))
+    .map(([n]) => n);
+  check(missing.length === 0, 'C-07b 契约:health 必须含 "' + k + '"(三种姿态都查);缺失姿态:' + (missing.join(',') || '无'));
+}
+// lastError **存在时必须带全** code / message / at(消费端读 code 与 at 做展示)
+check(
+  !!hDeg.lastError && hasKey(hDeg.lastError, 'code') && hasKey(hDeg.lastError, 'message') && hasKey(hDeg.lastError, 'at'),
+  'C-07b 契约:lastError 存在时必带 code/message/at:' + JSON.stringify(hDeg.lastError),
+);
+// 没坏过时必须是 **null**(不是 undefined) —— 消费端拿 `ah.lastError || {}` 与判空都要稳
+check(
+  hOk.lastError === null && hOff.lastError === null,
+  'C-07b 契约:未失败时 lastError 为 null(不是 undefined):' + JSON.stringify([hOk.lastError, hOff.lastError]),
+);
+// `state` 的**派生顺序**也是契约:先判 degraded、再判 configOff —— 反了会把"写入失败"显示成
+// "已按配置关闭"(语义正好相反,且是**安静的**错)。这两种状态在公开 API 上无法同时为真
+// (configOff 的闸门在最前面,永远走不到写盘 ⇒ 永远降不了级),运行时区分不出来 ⇒ 只能在源码文本上钉。
+const aSrc = readFileSync(join(root, 'lib/audit/access-log.js'), 'utf8');
+check(
+  /state:\s*degraded\s*\?\s*'degraded'\s*:\s*configOff\s*\?\s*'off'\s*:\s*'ok'/.test(aSrc),
+  "C-07b 契约:state 必须先判 degraded 再判 configOff(反了会把故障显示成'已关闭')",
+);
+check(
+  /if \(!degraded\) return;/.test(aSrc),
+  'C-07b 契约:noteLost 的守卫挂在 degraded 上(不是 lastError)—— 否则"配置关闭"场景会误计数',
+);
+
+// ---- 10) C-07b(2026-09-27):降级必须能**自己好起来**(旧实现一次失败 = 永久死) ----
+// 现场:2026-09-27 实测 10:26:49 之后再 41.6 分钟文件零增长 —— 进程健在、补丁在位、请求照发,
+// 增长 **0 字节**,只有重启才恢复。根因:旧实现全文件只有"初始化"与"失败"两处给状态赋值,
+// 没有任何清除点 ⇒ 一次失败之后请求只计数不写盘。
+// 手法沿用 §5:拿**同名文件**占住目录名 ⇒ mkdirSync 抛 EEXIST。注意这个 errno 长着"永久码"的脸,
+// 但它的条件是**瞬时**的(占位文件删掉就好)—— 所以按 errno 分类会刚好把它判死,本设计一律重试。
+const healRoot = mkdtempSync(join(tmpdir(), 'e4-access-heal-'));
+const healDir = join(healRoot, 'logs');
+writeFileSync(healDir, 'x');                     // 占位文件:目录建不起来
+const heal = createAccessLog({ dir: healDir, retryBaseMs: 0, degradeWarnMs: 0 });
+const realError = console.error;
+const healSeen = [];
+console.error = (...a) => { healSeen.push(a.map(String).join(' ')); };
+const beat = (logger) => { const r = mockRes(); logger.observe(mockReq(), r); r.writeHead(200); r.end(); };
+
+// 10a) 首次失败即降级(与 §5 同形,但这里多了"下次探针时刻")
+beat(heal);
+console.error = realError;
+const g1 = heal.info().health;
+check(g1.state === 'degraded', 'C-07b:首次写失败即降级:' + g1.state);
+check(g1.lost === 1, 'C-07b:触发失败的那一行计入丢失:' + g1.lost);
+check(g1.nextRetryAt > 0, 'C-07b:失败后**排定了下次探针时刻**(不再是无限期禁用):' + g1.nextRetryAt);
+check(g1.retryAttempts === 1 && g1.lostSince !== null, 'C-07b:连续失败次数/故障起点可见:' + JSON.stringify([g1.retryAttempts, g1.lostSince]));
+
+// 10b) **自行恢复(本组的关键一条)**:瞬时条件消失 ⇒ 下一次请求的写盘就是探针,写成功即自愈
+unlinkSync(healDir);
+console.error = (...a) => { healSeen.push(a.map(String).join(' ')); };
+beat(heal);
+console.error = realError;
+const g2 = heal.info().health;
+check(g2.state === 'ok', 'C-07b:条件恢复后下一次请求就自愈(state 回到 ok):' + g2.state);
+check(heal.info().disabled === false, 'C-07b:自愈后 info().disabled 回到 false(向后兼容字段同源)');
+check(g2.writes >= 1, 'C-07b:自愈这一次是**真写进去了**(writes 增长):' + g2.writes);
+check(!!g2.recoveredAt, 'C-07b:留下恢复时刻(否则"它什么时候好的"没有痕迹):' + g2.recoveredAt);
+check(g2.retryAttempts === 0 && g2.nextRetryAt === 0, 'C-07b:自愈后退避归零:' + JSON.stringify([g2.retryAttempts, g2.nextRetryAt]));
+check(g2.retrySucceeded === 1, 'C-07b:自愈成功次数累计:' + g2.retrySucceeded);
+const healFile = join(healDir, `access-${localDay()}.jsonl`);
+check(existsSync(healFile), 'C-07b:恢复后**日志文件真的出现了**(不是只改了状态位)');
+check(g2.lastError !== null, 'C-07b:lastError 作为历史证据保留(恢复不抹掉"坏过"这一事实)');
+check(healSeen.some((l) => l.includes('access log recovered')), 'C-07b:恢复喊一次告警(含丢失总量):' + (healSeen.find((l) => l.includes('recovered')) || healSeen[healSeen.length - 1]));
+heal.close();
+
+// 10c) 退避闸门不变量(证明"不是每请求重试"):60s 基线 ⇒ 窗口内那 3 次请求**一次盘都不碰**
+const stayDir = join(mkdtempSync(join(tmpdir(), 'e4-access-stay-')), 'logs');
+writeFileSync(stayDir, 'x');
+const stay = createAccessLog({ dir: stayDir, retryBaseMs: 60000, degradeWarnMs: 0 });
+console.error = () => {};
+beat(stay);                                       // 第 1 次:失败降级
+const s1 = stay.info().health;
+console.error = realError;
+check(s1.failures === 1 && s1.lost === 1, 'C-07b:第 1 次请求:真失败 1 次(丢失 1 行):' + JSON.stringify([s1.failures, s1.lost]));
+const sNext = s1.nextRetryAt;
+console.error = () => {};
+beat(stay); beat(stay); beat(stay);               // 再连发 3 次:全在退避窗口内
+console.error = realError;
+const s2 = stay.info().health;
+check(s2.failures === 1, 'C-07b:退避窗口内**不重试**(4 次请求只碰了 1 次磁盘):' + s2.failures);
+check(s2.lost === 4, 'C-07b:窗口内只计数(丢失 1 → 4):' + s2.lost);
+check(s2.nextRetryAt === sNext, 'C-07b:窗口内 nextRetryAt **不变**(闸门是时间,不是调用次数):' + s2.nextRetryAt);
+stay.close();
+
+// 10d) 第三个闸门(upgrade 通道)也必须能自愈 —— 三个闸门漏改任何一个,那条通道就还是"永久死"
+const upHealDir = join(mkdtempSync(join(tmpdir(), 'e4-access-upheal-')), 'logs');
+writeFileSync(upHealDir, 'x');
+const upHeal = createAccessLog({ dir: upHealDir, retryBaseMs: 0, degradeWarnMs: 0 });
+console.error = () => {};
+upHeal.observeUpgrade(mockReq({ method: 'GET', url: '/api/remote.mux' }), 101);
+const u1 = upHeal.info().health;
+check(u1.state === 'degraded' && u1.lost === 1, 'C-07b:upgrade 通道写失败同样降级:' + JSON.stringify([u1.state, u1.lost]));
+unlinkSync(upHealDir);
+upHeal.observeUpgrade(mockReq({ method: 'GET', url: '/api/remote.mux' }), 101);
+console.error = realError;
+const u2 = upHeal.info().health;
+check(u2.state === 'ok' && upHeal.info().disabled === false && u2.retrySucceeded === 1,
+  'C-07b:upgrade 通道(第三个闸门)也能自愈:' + JSON.stringify([u2.state, u2.retrySucceeded]));
+check(existsSync(join(upHealDir, `access-${localDay()}.jsonl`)), 'C-07b:upgrade 通道自愈后文件也真的出现');
+upHeal.close();
+
+// 10e) 恢复必须**重置告警节流**:否则恢复后紧接着再坏一轮,那一次的首次告警会被上一轮的 warnAt 吃掉
+const thDir = join(mkdtempSync(join(tmpdir(), 'e4-access-throttle-')), 'logs');
+writeFileSync(thDir, 'x');
+const th = createAccessLog({ dir: thDir, retryBaseMs: 0 });   // degradeWarnMs 走默认 60s
+const thSeen = [];
+const thMark = [];                               // 每次告警后的条数快照:用来钉住"哪一次喊了、哪一次没喊"
+console.error = (...a) => { thSeen.push(a.map(String).join(' ')); thMark.push(thSeen.length); };
+beat(th);                                        // ① 坏:首次立刻告警
+const markAfterFirst = thSeen.length;
+beat(th);                                        // ② 仍坏:60s 节流内不重复喊
+const markAfterSecond = thSeen.length;
+unlinkSync(thDir);
+beat(th);                                        // ③ 条件消失 ⇒ 自愈 + 恢复告警
+const markAfterHeal = thSeen.length;
+// ④ 再坏一轮:目录已经建起来了,所以改拿**当天日志的文件名**去占位(文件换成目录 ⇒ 写必抛 EISDIR)
+const thFile = join(thDir, `access-${localDay()}.jsonl`);
+unlinkSync(thFile);
+mkdirSync(thFile);
+beat(th);                                        // 若节流没被重置,这一声会被上一轮的 warnAt 吃掉
+console.error = realError;
+check(markAfterFirst === 1 && thSeen[0].includes('access log disabled'),
+  'C-07b:首次失败立刻告警:' + markAfterFirst);
+check(markAfterSecond === 1, 'C-07b:60s 节流内不刷屏(第 2 次失败没喊):' + markAfterSecond);
+check(markAfterHeal === 2 && thSeen[1].includes('access log recovered'), 'C-07b:恢复喊一次:' + thSeen[1]);
+check(thSeen.length === 3 && thSeen[2].includes('access log disabled'),
+  'C-07b:恢复后重置节流 ⇒ 下一轮故障立刻告警(没被上一轮吃掉):' + JSON.stringify(thMark));
+check(th.info().health.state === 'degraded' && th.info().health.retryAttempts === 1,
+  'C-07b:第二轮是**新的一次故障**(retryAttempts 从 0 重新数):' + JSON.stringify([th.info().health.state, th.info().health.retryAttempts]));
+th.close();
+
+// 10f) 时间闸门**会自己打开** —— 没有定时器、没有重启、也不需要有人来"踢一脚":
+//      这正是现场那次停摆的反面(41.6 分钟零增长)。整条链上唯一的推动力是"还有请求在来"。
+const gateDir = join(mkdtempSync(join(tmpdir(), 'e4-access-gate-')), 'logs');
+writeFileSync(gateDir, 'x');
+const gate = createAccessLog({ dir: gateDir, retryBaseMs: 400, degradeWarnMs: 0 });
+console.error = () => {};
+beat(gate);                                      // 失败 ⇒ 排定 ~400ms 后的探针
+beat(gate);                                      // 立刻再发:窗口内 ⇒ 不碰盘
+const w1 = gate.info().health;
+await new Promise((r) => setTimeout(r, 700));    // 窗口自然过期(模块里**没有任何定时器**在推进它)
+beat(gate);                                      // 窗口已过 ⇒ 自己再试一次(条件仍坏 ⇒ 再失败一次)
+const w2 = gate.info().health;
+console.error = realError;
+check(w1.failures === 1 && w1.lost === 2, 'C-07b:窗口内的请求只计数不碰盘:' + JSON.stringify([w1.failures, w1.lost]));
+check(w2.failures === 2 && w2.retryAttempts === 2 && w2.lost === 3,
+  'C-07b:窗口一过就**自己**再试(无人推进/无定时器):' + JSON.stringify([w2.failures, w2.retryAttempts, w2.lost]));
+check(w2.nextRetryAt > w1.nextRetryAt, 'C-07b:连败则退避加倍(400ms ⇒ 800ms):' + JSON.stringify([w1.nextRetryAt, w2.nextRetryAt]));
+// 与另一路(lib/host/api.js 的 /health)的**接口契约**:字段名与顺序照抄,多一个少一个都算改契约
+check(JSON.stringify(Object.keys(w2)) === JSON.stringify([
+  'state', 'writes', 'failures', 'lost', 'lostSince', 'lastError', 'warnedAt',
+  'recoveredAt', 'retryAttempts', 'nextRetryAt', 'retrySucceeded',
+]), 'C-07b:health 字段名/顺序照抄契约:' + JSON.stringify(Object.keys(w2)));
+gate.close();
+
+// ---- 11) C-07c(2026-09-27):`audit` 从「health 或 null」改成**两层** —— "没装上"必须能说出为什么 ----
+// 缺口:`audit: null` 此前同时代表四种情况(后端没重启 / 有意关闭 / **补丁没打** / 未挂载),
+// 界面上**长得一模一样**。第 3 种是真·静默失败(取证能力没上线而没人知道)。
+// 契约(与前端/测试的接口,字段名照抄):
+//   装上   ⇒ { installed:true, ...11 个 health 字段 }   —— 一个字段都不能少、不能改名
+//   没装上 ⇒ { installed:false, reason:'disabled-by-config'|'patch-missing'|'not-mounted' }
+//   老后端 ⇒ 压根没有 audit 字段(前端一个字符都不渲染;这一半由 §11c 的源码绊线看住)
+// 旧出口 `accessLogHealth()`(**原样返回 info,健康块在 .health 上)**:§9 已钉死"未装/卸载后 = null",
+// 保持不动 —— 新契约走**新导出**,不改旧函数(改它会当场让 §9:283/288 变红)。
+const { accessLogStatus } = await imp('lib/audit/index.js');
+const REASONS = ['disabled-by-config', 'patch-missing', 'not-mounted'];
+const realInfo = console.info;   // 安装器会往 stdout 喊一行,自证时要静音(用完必还原)
+// 11a) **两种形状互斥**:installed=true 不许带 reason;installed=false 必须带且取值在枚举内。
+//      这一条就是"绊线不许恒真"的锚:它同时约束两个分支,任一边漂了就红。
+const shapeOf = (s) => {
+  if (!s || typeof s !== 'object') return '非法形状(必须两层对象):' + JSON.stringify(s);
+  if (s.installed === true) return hasKey(s, 'reason') ? 'installed=true 却带了 reason' : null;
+  if (s.installed === false) return REASONS.includes(s.reason) ? null : 'installed=false 的 reason 不在枚举内:' + String(s.reason);
+  return 'installed 必须是布尔:' + JSON.stringify(s.installed);
+};
+// 11b) 三个 reason 各自的**可复现构造**(都靠 opts.home 指向合成 home,不碰真机 ~/.dsh)
+const altHome = mkdtempSync(join(tmpdir(), 'e4-status-home-'));
+const patchFile = join(altHome, 'logs', PATCH_STATE_FILE);
+mkdirSync(join(altHome, 'logs'), { recursive: true });
+// "补丁已 applied"的**合成**状态(照抄补丁脚本写的形状;不读真机那份,免得被现场状态绑住)
+const appliedState = JSON.stringify({
+  marker: PATCH_MARKER, mode: 'check',
+  targets: PATCH_TARGETS.map((t) => ({ id: t.id, state: 'applied' })),
+});
+// ① 补丁状态文件不在 ⇒ 'patch-missing'(真·静默失败:钩子永远收不到调用)
+const stMissing = accessLogStatus({ home: altHome });
+check(stMissing.installed === false && stMissing.reason === 'patch-missing',
+  'C-07c:补丁状态文件不在 ⇒ patch-missing:' + JSON.stringify(stMissing));
+// ② 状态文件在位且两条目标都 applied,但日志器没装 ⇒ 'not-mounted'(兜底分类)
+writeFileSync(patchFile, appliedState);
+const stNotMounted = accessLogStatus({ home: altHome });
+check(stNotMounted.installed === false && stNotMounted.reason === 'not-mounted',
+  'C-07c:补丁在位但没装 ⇒ not-mounted:' + JSON.stringify(stNotMounted));
+// ③ 补丁**半途**(一条 applied、一条 stale)⇒ 仍算 patch-missing —— 半打的补丁等于没打
+writeFileSync(patchFile, JSON.stringify({
+  marker: PATCH_MARKER, mode: 'check',
+  targets: [{ id: PATCH_TARGETS[0].id, state: 'applied' }, { id: PATCH_TARGETS[1].id, state: 'stale' }],
+}));
+check(accessLogStatus({ home: altHome }).reason === 'patch-missing', 'C-07c:补丁不完整也算 patch-missing(半打=没打)');
+// ④ 标记不是本插件的 ⇒ 同样是 patch-missing(别人的状态文件不算数)
+writeFileSync(patchFile, JSON.stringify({ marker: 'someone-else', targets: [{ id: 'x', state: 'applied' }] }));
+check(accessLogStatus({ home: altHome }).reason === 'patch-missing', 'C-07c:marker 不匹配 ⇒ patch-missing(不信别人的状态文件)');
+// ⑤ 有意关闭:`enabled:false` 是**调用方带进来的**判据(重启后模块内拿不到,见实现注释)
+check(accessLogStatus({ home: altHome, enabled: false }).reason === 'disabled-by-config',
+  'C-07c:调用方传 enabled:false ⇒ disabled-by-config(与"没装上"分开)');
+// ⑥ 安装器自己留的痕:同进程内装一次(带 enabled:false)后,不传 opts 也能说出来
+const offDir = mkdtempSync(join(tmpdir(), 'e4-status-off-'));
+console.info = () => {};                                  // 安装器那行 "access log off" 只是噪声
+const disposeOff = installAccessLog({}, { dir: offDir, enabled: false });
+console.info = realInfo;
+check(accessLogStatus({ home: altHome }).reason === 'disabled-by-config',
+  'C-07c:安装器留痕 ⇒ 不传 opts 也说 disabled-by-config(不再谎报 not-mounted)');
+// ⑦ 卸载/复位后不留残影:关过一次**不能**让后面的判断永远说"有意关闭"
+//    (判据链是 active → offByConfig/opts → patchApplied → not-mounted,所以这里先把
+//     patch 状态摆成"已 applied" ⇒ 正确结果必然是 not-mounted;若留痕没复位就会谎报"有意关闭")
+writeFileSync(patchFile, appliedState);
+disposeOff();
+const stReset = accessLogStatus({ home: altHome });
+check(stReset.reason === 'not-mounted',
+  'C-07c:关闭态 disposer 复位留痕 ⇒ 之后回到真实原因:' + JSON.stringify(stReset));
+// ⑦b 判据**优先级**也是契约:有意关闭先于"补丁没打" —— 传了 enabled:false 就直说关闭
+//     (补丁此刻仍缺 ⇒ 若优先级反了,这里会拿到 patch-missing)
+writeFileSync(patchFile, JSON.stringify({ marker: 'someone-else', targets: [] }));
+check(accessLogStatus({ home: altHome, enabled: false }).reason === 'disabled-by-config',
+  'C-07c:opts.enabled===false 优先级高于 patch 判据(不会把"主人关的"说成"补丁没打")');
+writeFileSync(patchFile, appliedState);   // 复位:后面几条都靠"补丁在位"这个前提
+// ⑧ 装上那一半:`installed:true` + 11 个 health 字段齐、无 reason、无 key 漂移
+console.info = () => {};
+const disposeOn = installAccessLog({}, { dir: offDir, degradeWarnMs: 0 });
+console.info = realInfo;
+const stOn = accessLogStatus();
+check(stOn.installed === true, 'C-07c:装上 ⇒ installed:true:' + JSON.stringify(stOn.installed));
+check(shapeOf(stOn) === null, 'C-07c:装上这一支的形状合法:' + String(shapeOf(stOn)));
+const missOn = HEALTH_KEYS.filter((k) => !hasKey(stOn, k));
+check(missOn.length === 0, 'C-07c:installed=true 时 11 个 health 字段一个不少;缺:' + (missOn.join(',') || '无'));
+check(!hasKey(stOn, 'reason'), 'C-07c:installed=true 时**不得**带 reason(两个分支互斥)');
+// 键序照抄:installed 打头 + 11 个字段原序(消费端可能按位读,也让"顺序被重排"当场可见)
+check(JSON.stringify(Object.keys(stOn)) === JSON.stringify(['installed', ...HEALTH_KEYS]),
+  'C-07c:键序 = installed + 11 字段原序:' + JSON.stringify(Object.keys(stOn)));
+check(stOn.state === 'ok' && stOn.writes === 0, 'C-07c:带过来的 health 是真值(不是占位):' + JSON.stringify([stOn.state, stOn.writes]));
+disposeOn();
+check(accessLogStatus({ home: altHome }).reason === 'not-mounted', 'C-07c:卸载后回到"没装上"那一支');
+// ⑨ 旧出口**没被动过**:§9 的 `accessLogHealth() === null` 继续成立(两条出口不是同一条)
+check(accessLogHealth() === null, 'C-07c:旧出口 accessLogHealth() 语义不变(仍未装 ⇒ null)');
+shapeOf(stMissing); shapeOf(stNotMounted); shapeOf(stOn);
+
+// 11c) **消费端源码绊线**:形状改了但前端/路由没跟上 = 界面上静悄悄显示错(比不显示更坏)
+const apiSrc = readFileSync(join(root, 'lib/host/api.js'), 'utf8');
+check(/return accessLogStatus\(\{ enabled: [^)]*\}\);/.test(apiSrc),
+  'C-07c:/health 与两个视图的 audit 字段都走 accessLogStatus({ enabled })');
+check(!/accessLogHealth\(\)\?\.health/.test(apiSrc),
+  'C-07c:旧写法 `accessLogHealth()?.health ?? null` 已撤(否则"没装上"永远说不出口)');
+check(/catch \{ return null; \}/.test(apiSrc), 'C-07c:健康面仍保 try/catch(不许把 sendJson 带崩)');
+// 11c-2) **真发一发** `/health`(不碰真网络):拿假 webServer 收下路由表,再把 handler 当函数调一次。
+//        这一步是"契约真到得了网线那头"的证据 —— 上面前两条只证明源码里有这行字。
+const routes = new Map();
+const fakeServer = { register: (r) => { routes.set(r.path, r.handler); return () => {}; } };
+let wireErr = null;
+try {
+  const { registerApi } = await imp('lib/host/api.js');
+  registerApi({ get: () => fakeServer },
+    { gate: {}, memory: { kvSet() {}, listOverviews: () => [], fingerprint: () => '' }, settings: { get: () => ({ guard: { enforce: false } }) } },
+    { version: 'test' });
+} catch (e) { wireErr = e; }   // 宿主契约若变了,这里可能抛 —— 抛了就当"这一条测不了",不让它把整份测试带崩
+const healthHandler = routes.get('/api/dsh-ling/health');
+check(!!healthHandler, 'C-07c:/health 路由确实注册了(路径 = /api/dsh-ling/health);挂到:' + [...routes.keys()].length + ' 条;异常:' + String(wireErr && wireErr.message));
+if (healthHandler) {
+  const out = { headers: {}, body: '' };
+  const res = { statusCode: 0, setHeader: (k, v) => { out.headers[k] = v; }, end: (b) => { out.body = String(b); } };
+  await healthHandler({ method: 'GET', url: '/api/dsh-ling/health', headers: { host: '127.0.0.1:3080' }, socket: { remoteAddress: '127.0.0.1' } }, res);
+  const parsed = JSON.parse(out.body);
+  check(/application\/json/.test(String(out.headers['Content-Type'])), 'C-07c:/health 回 JSON(Content-Type 就位)');
+  check(parsed.ok === true && parsed.plugin === 'dsh-ling', 'C-07c:/health 仍是老形状(ok/plugin 没被新契约挤掉)');
+  check(shapeOf(parsed.audit) === null, 'C-07c:/health 上的 audit 形状合法(两层契约真的走出去了):' + String(shapeOf(parsed.audit)));
+  // 此刻进程里日志器是**没装**的(§9 已 dispose 且此后没再装),patch 状态又是合成 home ⇒ 必然是"没装上"那一支
+  check(parsed.audit && parsed.audit.installed === false && REASONS.includes(parsed.audit.reason),
+    'C-07c:/health 真的说出了"为什么没装":' + JSON.stringify(parsed.audit));
+  check(parsed.audit && (!hasKey(parsed.audit, 'writes') || parsed.audit.installed === true),
+    'C-07c:没装上时不带 health 字段(两种形状不许混在一起)');
+}
+const cliSrc = readFileSync(join(root, 'lib/client.js'), 'utf8');
+check(/installed === false/.test(cliSrc) && /已按配置关闭/.test(cliSrc) && /补丁未应用/.test(cliSrc) && /未挂载/.test(cliSrc),
+  'C-07c:面板认得 installed:false 三种原因(关了 / 补丁没打 / 没挂载 必须能分辨)');
+// 红点判据**行为绊线**(不是"源码里有这几个字"那种恒真断言):
+// 把那段真判据原文抠出来,**逐字**跑一张真值表 —— 改判据(哪怕加个 `|| true`)当场就红。
+const offSrcM = /var auditOffBad = ([\s\S]*?\));[\r\n]\s*var auditBad = ([^;]*);/.exec(cliSrc);
+check(!!offSrcM, 'C-07c:能在 client.js 里抠到红点判据那两行(名字/形状没被重构掉)');
+const badOf = (audit) => {
+  const stub = (audit === undefined) ? 'var st = {};' : ('var st = { audit: ' + JSON.stringify(audit) + ' };');
+  const src = stub + '\n'
+    + 'var auditOffBad = ' + offSrcM[1].split('\n').map((s) => s.trim()).join('\n') + ';\n'
+    + 'var auditBad = ' + offSrcM[2] + ';\nreturn { off: auditOffBad, bad: auditBad };';
+  return new Function(src)();
+};
+const TRUTH = [
+  [{ state: 'ok', writes: 3, lost: 0 }, false, false, '正常不红'],
+  [{ state: 'degraded', lost: 2, lastError: { code: 'EACCES' } }, false, true, '停写必红'],
+  [{ installed: false, reason: 'patch-missing' }, true, true, '补丁没打(真静默失败)必红'],
+  [{ installed: false, reason: 'not-mounted' }, true, true, '未挂载(应为但没装)必红'],
+  [{ installed: false, reason: 'disabled-by-config' }, false, false, '有意关闭**不染红**(否则红点没人看)'],
+  [{ installed: true, state: 'off', writes: 0, lost: 0 }, false, false, '老姿势 state=off 也不红'],
+  [undefined, false, false, '老后端(没有 audit 字段)不红'],
+];
+for (const [audit, wantOff, wantBad, why2] of TRUTH) {
+  const got = badOf(audit);
+  check(got.off === wantOff && got.bad === wantBad,
+    'C-07c 红点真值表 · ' + why2 + ' ⇒ ' + JSON.stringify(got) + '(期望 off=' + wantOff + ' bad=' + wantBad + ')');
+}
+// 原因 → 中文:面板那个对象字面量里的键值必须**逐字**对上契约(键错 = 界面上显示"原因未知(…)"甚至空白)
+const whyMapM = /\{\s*'disabled-by-config':\s*'([^']*)',\s*'patch-missing':\s*'([^']*)',\s*'not-mounted':\s*'([^']*)'\s*\}/.exec(cliSrc);
+check(!!whyMapM && whyMapM[1] === '已按配置关闭' && whyMapM[2] === '补丁未应用' && whyMapM[3] === '未挂载',
+  'C-07c:原因 → 中文的映射逐字照抄:' + JSON.stringify(whyMapM ? [whyMapM[1], whyMapM[2], whyMapM[3]] : null));
+check(/lines\.push\('访问日志: 未启用（' \+ why \+ '）'\)/.test(cliSrc),
+  'C-07c:面板文案 = 访问日志: 未启用（<中文原因>）');
+// 面板那支**必须**对三个 reason 都给出非空中文:映射表就是判据本身(上面已逐字对上),
+// 这里再钉一条"表里只有这三个键、没有多余的" —— 多一个键意味着有人往契约里塞了第四种原因。
+const whyKeys = whyMapM ? new Function('return Object.keys(' + whyMapM[0] + ');')() : [];
+check(JSON.stringify(whyKeys) === JSON.stringify(REASONS),
+  'C-07c:原因映射表的键恰为三个契约值:' + JSON.stringify(whyKeys));
+// 老后端(没有 audit 字段)⇒ 一个字符都不渲染:分支必须整体挂在 `if (r.audit)` 之内
+const panelAt = cliSrc.indexOf('installed === false');
+check(panelAt > 0 && cliSrc.lastIndexOf('if (r.audit) {', panelAt) > 0,
+  'C-07c:新分支在 `if (r.audit)` 之内(老后端仍是一个字符都不渲染)');
 
 log.close();
 console.log(ok ? 'E4 访问日志全部通过 ✓' : '存在失败 ✗');

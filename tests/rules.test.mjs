@@ -103,6 +103,7 @@ const infoBlock = apiSrc.slice(apiSrc.indexOf('const personaInfo'), apiSrc.index
 check(/habits:\s*Array\.isArray/.test(infoBlock), 'personaInfo 带出 habits');
 check(/habitsPending:\s*Array\.isArray/.test(infoBlock), 'personaInfo 带出 habitsPending');
 check(/pronoun:\s*s\?\.persona\?\.pronoun/.test(infoBlock), 'personaInfo 带出 pronoun(同类漏字段=界面静默错)');
+check(/duty:\s*s\?\.persona\?\.duty/.test(infoBlock), 'personaInfo 带出 duty(漏 ⇒ 人格中心「职业 / 职责 / 责任」恒空,填了也会看着像没保存)');
 
 // 13) 源码护栏:代词属"契约类" → 定型(未解锁)时界面必须禁用;习惯区不得再解释"需做手术"
 const clientSrc = readFileSync(join(root, 'lib/client.js'), 'utf8');
