@@ -12,7 +12,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
 const {
   createAccessLog, localIso, localDay, rejectionReason, deviceIdFromCookieValue,
-  deviceIdDigest, DEVICE_ID_HASH, POSTURE_PROBE_PATH,
+  deviceIdDigest, DEVICE_ID_HASH, POSTURE_PROBE_PATH, resolveDeviceCookie, ACCESS_LOG_DEFAULTS,
 } = await imp('lib/audit/access-log.js');
 const { PATCH_TARGETS, PATCH_MARKER, PATCH_STATE_FILE, OBSERVE_GLOBAL, UPGRADE_GLOBAL } = await imp('lib/audit/patch-spec.js');
 
@@ -51,7 +51,7 @@ function lastLine(dir) {
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'e4-access-log-'));
-const log = createAccessLog({ dir, deviceCookie: 'dsh_pair-W', uaMax: 20, maxTotalBytes: 64 * 1024 });
+const log = createAccessLog({ dir, deviceCookie: 'dsh_pair-x', uaMax: 20, maxTotalBytes: 64 * 1024 });
 
 // 1) 三种被拦形态 + 一种放行形态(任务书 §3.2 的 rejection 字段)
 // 1a) **契约变更(C-14,2026-09-25)**：`rejection` 现在**优先取 `req.__dshLingRejection`**
@@ -59,6 +59,8 @@ const log = createAccessLog({ dir, deviceCookie: 'dsh_pair-W', uaMax: 20, maxTot
 //     的前提是"全系统只有 core 栅栏会返回 403" —— C-02 让器灵 guard 拒的请求也进了这份日志，
 //     该前提失效（cross-site / origin-mismatch / no-cookie / empty-cookie 四种全被误标）。
 //     下面这条**不带**标记的 403 = core 栅栏的流量 ⇒ fallback 必须原样保留。
+//     ⚠ 夹具里的 Host/IP 一律用**文档用网段**（RFC 5737 的 192.0.2.0/24）:这里要的只是
+//     "一个非 loopback 的局域网 Host",没有理由把作者本机的真实网段写进公开文件。
 const e403 = run(log, mockReq({ headers: { host: '192.0.2.66:3080' } }), 403);
 check(e403.status === 403 && e403.rejection === 'untrusted-host', '403 无真因标记 → fallback untrusted-host(未被破坏):' + JSON.stringify(e403.rejection));
 // 1b) C-14 验收①：同样的 403，带器灵 guard 的真因 ⇒ 必须记真因，不许再误标 untrusted-host
@@ -81,7 +83,7 @@ const e401a = run(log, mockReq({ headers: { host: '127.0.0.1:3080' } }), 401);
 check(e401a.rejection === 'no-cookie', '401 无 cookie → no-cookie:' + e401a.rejection);
 const e401b = run(log, mockReq({ headers: { host: '127.0.0.1:3080', cookie: 'dsh-auth-xyz=deadbeef' } }), 401);
 check(e401b.rejection === 'bad-cookie', '401 带伪 cookie → bad-cookie:' + e401b.rejection);
-const e200 = run(log, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair-W=${HEX}` } }), 200);
+const e200 = run(log, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair-x=${HEX}` } }), 200);
 check(e200.status === 200 && e200.rejection === null, '200 → rejection 为 null');
 // **C-01 端到端**：cookie 里的凭据是 HEX，落盘的必须只有摘要（旧实现落的是原文）。
 check(e200.deviceId === HEX_DIGEST && e200.deviceCookie === true, '设备字段落地为摘要:' + e200.deviceId);
@@ -89,7 +91,7 @@ check(e200.deviceIdHash === DEVICE_ID_HASH, '摘要带形态标记 deviceIdHash:
 check(e200.deviceId !== HEX && !JSON.stringify(e200).includes(HEX), '日志行里不得出现凭据原文');
 check(e200.channel === 'no-ua', '无 UA 的放行行标 channel:"no-ua":' + JSON.stringify(e200.channel));
 // C-01 端到端②：同一个键以**大写**形态出现在 cookie 里 ⇒ 落盘摘要必须与上一条相同（抽取器归一）
-const e200u = run(log, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair-W=${HEX.toUpperCase()}` } }), 200);
+const e200u = run(log, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair-x=${HEX.toUpperCase()}` } }), 200);
 check(e200u.deviceId === HEX_DIGEST && e200u.deviceId !== HEX.toUpperCase(), '同一设备的大写形态 → 同一摘要:' + e200u.deviceId);
 
 // 1b) 元数据当场可见:写入后文件大小/mtime 必须立刻更新。
@@ -632,6 +634,73 @@ check(JSON.stringify(whyKeys) === JSON.stringify(REASONS),
 const panelAt = cliSrc.indexOf('installed === false');
 check(panelAt > 0 && cliSrc.lastIndexOf('if (r.audit) {', panelAt) > 0,
   'C-07c:新分支在 `if (r.audit)` 之内(老后端仍是一个字符都不渲染)');
+
+// ---- 12) CR-1(2026-10-01 红队,发布阻断项):设备 cookie 名**默认值必须中性** + 配置通路仍生效 ----
+// 现场:那行默认值曾写成**某一台机器改过名的 cookie 名**(remote-web-ui 的 `cookieName`),被当成了
+// 出厂默认 —— 具体值不在本文件复述(本文件同样是公开物)。后果双重:① 这行随包公开;
+// ② 别人机器上 cookie 名对不上 ⇒ `deviceCookie` **恒 false**、设备维度**静默失效**
+// (看起来像"这台设备没带 cookie",比漏记更坏)。
+// 三条断言:① 不带任何配置 ⇒ 中性默认(且真的能认出标准 cookie);② 配了 ⇒ 取配置值
+// (env 与宿主配置两条通路,后者 = 本机改名仍能生效的证明);③ 源码级护栏,拦"带后缀的改名"
+// 这一整类回归。
+// ⚠ 环境变量是**进程级**的:本段自己设置并恢复 `process.env`,既不依赖跑测机器的环境,
+//   也不把值漏给后面可能新增的用例(段与段之间本来就是独立进程)。
+check(resolveDeviceCookie({}, {}) === 'dsh_pair' && ACCESS_LOG_DEFAULTS.deviceCookie === 'dsh_pair',
+  'CR-1①:出厂默认 = 上游 remote-web-ui 的默认名(中性,不带任何机器的私有改名):' + ACCESS_LOG_DEFAULTS.deviceCookie);
+check(resolveDeviceCookie({}, { DSH_LING_DEVICE_COOKIE: 'dsh_pair-x' }) === 'dsh_pair-x',
+  'CR-1②a:环境变量 DSH_LING_DEVICE_COOKIE 能改掉默认名(不改代码即恢复本机改名)');
+check(resolveDeviceCookie({ deviceCookie: 'dsh_pair-y' }, { DSH_LING_DEVICE_COOKIE: 'dsh_pair-x' }) === 'dsh_pair-y',
+  'CR-1②b:宿主配置(accessLog.deviceCookie)优先于环境变量');
+check(resolveDeviceCookie({ deviceCookie: '   ' }, { DSH_LING_DEVICE_COOKIE: '  ' }) === 'dsh_pair',
+  'CR-1:空串 / 纯空白按"没设"处理(回落中性默认,不产生空 cookie 名)');
+
+const savedEnvCookie = process.env.DSH_LING_DEVICE_COOKIE;
+const dirCookie = mkdtempSync(join(tmpdir(), 'e4-access-cookie-'));
+try {
+  // ① 默认情形:进程里没有任何配置 ⇒ 日志器必须按中性默认名找 cookie,且**找得到**
+  delete process.env.DSH_LING_DEVICE_COOKIE;
+  const neutral = createAccessLog({ dir: dirCookie });
+  check(neutral.info().deviceCookie === 'dsh_pair',
+    'CR-1①:不带配置建日志器 ⇒ info() 报中性默认名:' + neutral.info().deviceCookie);
+  const eDef = run(neutral, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair=${HEX}` } }), 200);
+  check(eDef.deviceCookie === true && eDef.deviceId === HEX_DIGEST,
+    'CR-1①:中性默认名下,**标准 cookie** 认得出(设备维度真的活着):' + JSON.stringify([eDef.deviceCookie, eDef.deviceId]));
+  neutral.close();
+
+  // ② 配置优先:env 设成改名 ⇒ 日志器按它取;**改名生效后新名认得出、旧名不再误认**
+  process.env.DSH_LING_DEVICE_COOKIE = 'dsh_pair-x';
+  const renamed = createAccessLog({ dir: dirCookie });
+  check(renamed.info().deviceCookie === 'dsh_pair-x',
+    'CR-1②:环境变量生效,日志器取到配置值:' + renamed.info().deviceCookie);
+  const eRen = run(renamed, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair-x=${HEX}` } }), 200);
+  const eOld = run(renamed, mockReq({ headers: { host: '127.0.0.1:3080', cookie: `dsh_pair=${HEX}` } }), 200);
+  check(eRen.deviceCookie === true && eRen.deviceId === HEX_DIGEST && eOld.deviceCookie === false,
+    'CR-1②:改名生效 ⇒ 新名认得出 / 旧名不再误认:' + JSON.stringify([eRen.deviceCookie, eOld.deviceCookie]));
+  renamed.close();
+
+  // ② 宿主配置通路(**这条证明"本机改名仍能生效"**):与 lib/index.js:72 → lib/audit/index.js:98
+  //    同一接线 —— installer 把 cfg.accessLog 原样透传给 createAccessLog。
+  const disposeCfg = installAccessLog({}, { dir: dirCookie, deviceCookie: 'dsh_pair-y' });
+  check(accessLogHealth()?.deviceCookie === 'dsh_pair-y',
+    'CR-1②:宿主配置 accessLog.deviceCookie 生效且优先于环境变量(installer 透传):' + accessLogHealth()?.deviceCookie);
+  disposeCfg();
+} finally {
+  if (savedEnvCookie === undefined) delete process.env.DSH_LING_DEVICE_COOKIE;
+  else process.env.DSH_LING_DEVICE_COOKIE = savedEnvCookie;
+}
+
+// ③ 源码级护栏:默认值位**不许**再出现"带后缀的改名"这一整类值。
+// 判据刻意**不写那个具体值**(本文件同样是公开物,不再抄一遍):`dsh_pair` 紧跟字母/数字 = 带后缀
+// 的改名 —— 拦的是"某一台机器的值被粘进默认位"这个**类**,而不是某一个字符串。
+const srcCookie = readFileSync(join(root, 'lib/audit/access-log.js'), 'utf8');
+check(!/dsh_pair-[A-Za-z0-9]/.test(srcCookie),
+  'CR-1③:源码里不得再出现"带后缀的改名"(这一类回归通杀,连注释一起查)');
+check(/deviceCookie:\s*'dsh_pair'/.test(srcCookie),
+  'CR-1③:默认值位置逐字是中性名 dsh_pair(不是引用别的常量、也不是改名)');
+check(/export function resolveDeviceCookie\(/.test(srcCookie) && /const deviceCookie = resolveDeviceCookie\(options\)/.test(srcCookie),
+  'CR-1③:cookie 名只有一条解析路径(option → env → 默认),不是第二处手写副本');
+check(!/String\(options\.deviceCookie \|\| ACCESS_LOG_DEFAULTS\.deviceCookie\)/.test(srcCookie),
+  'CR-1③:旧的"选项或默认"二值写法已撤(它读不到 env,中性化后会弄坏改过名的机器)');
 
 log.close();
 console.log(ok ? 'E4 访问日志全部通过 ✓' : '存在失败 ✗');

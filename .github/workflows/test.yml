@@ -1,0 +1,101 @@
+# dsh-ling · 测试链(分段跑)
+# ---------------------------------------------------------------------------
+# 这份 workflow 只做一件事:把 `npm test` 那条 `&&` 长链**逐段拆开跑、逐段记退出码**。
+#
+# 为什么不用 `npm run test` 一把梭:`&&` 链第一个红的段会**短路**掉后面所有段 ——
+#   "链尾没报错"只说明没跑到,不说明全过。判绿的读数必须能区分
+#   "全过" 与 "跑了一半就停了"。
+#
+# ⚠️ 纪律(与开发时在本机分段跑同一口径;判据落在本仓库的 `tests/` 与下面的第 1 步):
+#   ① 只**读** `package.json` 的 `scripts.test`,不在这里另写一份用例清单
+#      —— 两份清单必然漂移,漂移的那份还会被当成"绿的";
+#   ② **绝不**用 `tail -n N` 之类截尾判绿:每段一行、末尾给总数,红的段单独列名;
+#   ③ 段数必须 ≥1 且与 `scripts.test` 里的段数逐字相符(见下面的第 3 步)
+#      —— "零段可跑"和"全绿"长得一模一样,必须显式分辨;
+#   ④ 不用 `continue-on-error`、不 `|| true`:红的段必须把 job 带红。
+#
+# ⚠️ Node 只跑 24.x,是有意为之:测试链里 `lib/host/memory.js` 用了 `node:sqlite`
+#    (`DatabaseSync`),24.x 上实测免 flag;**22.x 是否需要 `--experimental-sqlite` 未实测**
+#    ⇒ 在没实测之前不写 22,免得 CI 红在一个
+#    与改动无关的平台上、还让人以为是代码坏了。要加 22 就先在 22 上跑通一次再进矩阵。
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node 24.x)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      # 本包当前没有依赖(无不带 devDependencies 的 lockfile 时跳过安装),
+      # 保留这一段是为了将来加依赖时不必再改 workflow。
+      - name: Install (only when a lockfile exists)
+        run: |
+          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else echo 'no lockfile -> no install'; fi
+
+      # ── 1. 从 package.json 取段清单(单一来源)─────────────────────────────
+      - name: Extract test segments
+        working-directory: ${{ github.workspace }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const segs = String(pkg.scripts?.test || "").split("&&").map(s => s.trim()).filter(Boolean);
+            if (!segs.length) { console.error("scripts.test 为空 -> 无段可跑,这不是全绿"); process.exit(1); }
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/segments.txt", segs.join("\n") + "\n");
+            console.log("SEGMENTS_TOTAL=" + segs.length);
+          '
+
+      # ── 2. 逐段跑:每段一行 + 退出码;红的段单列;末尾给总数 ──────────────
+      - name: Run segments (per-segment exit code)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -u
+          mapfile -t SEGS < "$RUNNER_TEMP/segments.txt"
+          total=${#SEGS[@]}
+          pass=0
+          failed=()
+
+          echo "SEGMENTS_TOTAL=$total"
+          for i in "${!SEGS[@]}"; do
+            seg="${SEGS[$i]}"
+            n=$((i + 1))
+            t0=$SECONDS
+            set +e
+            bash -c "$seg"
+            code=$?
+            set -e
+            ms=$(( (SECONDS - t0) * 1000 ))
+            if [ "$code" -eq 0 ]; then
+              pass=$((pass + 1)); verdict=PASS
+            else
+              verdict=FAIL; failed+=("seg#${n}(exit=${code}): ${seg}")
+            fi
+            printf '[SEG %02d/%02d] %s exit=%d %dms :: %s\n' "$n" "$total" "$verdict" "$code" "$ms" "$seg"
+          done
+
+          # ── 3. 自检:段数必须与清单一致(防止循环没跑完就"看起来绿")──────
+          if [ "$((pass + ${#failed[@]}))" -ne "$total" ]; then
+            echo "::error::跑过的段数与 SEGMENTS_TOTAL 不符:这是读数坏了,不是全绿"
+            exit 1
+          fi
+
+          for f in "${failed[@]:-}"; do [ -n "$f" ] && echo "::error::FAILED $f"; done
+          echo "PASS_SEGMENTS=$pass · FAIL_SEGMENTS=${#failed[@]}"
+          if [ "${#failed[@]}" -ne 0 ]; then exit 1; fi

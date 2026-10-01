@@ -2,7 +2,7 @@
 // E4 访问日志 · 核心补丁脚本（幂等 / 可回滚 / 可自检）
 //
 // 背景：`/api` 的 403/401 栅栏在 core 里（dsh-client-connection），插件层看不到 ——
-// 而"谁在什么时候被拦下"恰恰是悬案最缺的那条证据（任务书 §3.4 首选落点）。
+// 而"谁在什么时候被拦下"恰恰是悬案最缺的那条证据（E4 设计里定下的首选落点）。
 // 解决办法不是把逻辑搬进 core，而是让 core 多一行**可选调用**：
 //
 //     globalThis.__dshAccessLogObserve?.(req, res); // E4 access log (dsh-ling patch)

@@ -137,15 +137,30 @@ export const REQUIRED = [
 ];
 
 // ---------------------------------------------------------------- 判据 2:出站固定域名扫描
-// 基线 4 处(实测):lib/client.js ×2(本地面板 API)+ lib/host/dsweb-summary.js ×2
+// 基线 6 处(实测):lib/client.js ×4(本地面板 API)+ lib/host/dsweb-summary.js ×2
 // (用户自配 provider baseUrl)。白名单按「文件 + 归属函数」判定,不按行号 —— 行号最容易过期。
+//
+// 2026-10-01 基线 4 → 6 的依据(**先把 6 处逐处定性完,再改基线**;逐处结论:无一处指向第三方域名):
+//   · 新增的 2 处**同源**,都出自 2026-09-30 深夜的"手术门票据"特性,且都在 lib/client.js 内:
+//     ① `fetchSurgeryTicket`(client.js:173)—— 打的是同一个文件内的常量 `API` + '/surgery/ticket',
+//        而 `API = '/api/dsh-ling'` 是**相对路径** ⇒ 同源(就是面板自己所在的宿主),不含任何主机名;
+//        宿主侧该端点只认本机直连,带代理头的请求会被拒 —— 方向是"往自己家要票",不是外发。
+//     ② `api` 内新增的"宿主说没票 ⇒ 现场取一次票、原样重发一次"分支(client.js:199,另一个 `API` + path)
+//        —— 归属函数仍是**已在白名单**的 `api`,只是该函数体内的第 2 个调用点。
+//   · 对拍凭证(可复核):改动前的备份 `client.js.20260930-222206.bak` 命中 2 处(api / exportMemory);
+//     特性落地后的备份 `client.js.20260930-235710.NOT-PRE-CHANGE.bak` 命中 4 处 ⇒ 差额恰好是上面 2 处。
+//   · 其余 4 处维持原判:client.js 的 api×2 / exportMemory(本地面板 API,同源回环)
+//     + dsweb-summary.js 的 probeAssistant / summarizeLocal(地址由 baseUrl 参数给出:
+//     settings.assistant → 环境变量 → 内置 loopback http://127.0.0.1:11434/v1,三级覆盖见 resolveAssistant)。
 export const OUTBOUND = {
   re: re('fe·tch\\(|no·de:https|no·de:net|ax·ios|un·dici|new ·WebSocket|Event·Source|XMLHttp·Request|https?\\.req·uest'),
-  baseline: 4,
+  baseline: 6,
   whitelist: [
     {
       file: 'lib/client.js',
-      fn: ['api', 'exportMemory'],
+      // 2026-10-01 补 `fetchSurgeryTicket`:它的出站调用 = 本文件常量 `API` + '/surgery/ticket'
+      //(同源 / 回环),与 `api` 同一个常量、同一个宿主,故与上一行同属"本地面板 API"这一类。
+      fn: ['api', 'exportMemory', 'fetchSurgeryTicket'],
       why: '本地面板 API:走文件内的 API 常量(同源 / 回环),不算外发',
     },
     {
@@ -242,7 +257,7 @@ export function scanCorpus(entries) {
     problems.push({
       id: 'F-OUTBOUND-DRIFT', file: '(全库)', line: 0,
       msg: `出站模式命中 ${outbound.length} 处 ≠ 基线 ${OUTBOUND.baseline} 处`,
-      reason: '基线:面板 API ×2 + 用户自配 baseUrl ×2;漂移时逐处理清,再更新基线',
+      reason: '基线:面板 API ×4(含手术门票据端点与其重发分支)+ 用户自配 baseUrl ×2;漂移时逐处理清,再更新基线',
     });
   }
   return { problems, outbound, stats: { files: list.length, outboundHits: outbound.length } };

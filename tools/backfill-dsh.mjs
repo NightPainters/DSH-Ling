@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { dshHome } from '../lib/host/util.js';
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -16,7 +17,11 @@ const { scanDshHistory } = await imp('lib/host/backfill.js');
 const args = process.argv.slice(2);
 const g = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const target = g('db', join(LING_DIR, 'memory.db'));
-const sessionsRoot = g('root', join(homedir(), '.dsh', 'sessions'));
+// ⚠️ 默认会话根必须走 `dshHome()`(2026-09-29 修):旧写法 `join(homedir(), '.dsh', 'sessions')`
+//   **不认 `DSH_HOME`** —— 而同一个文件上面第 11 行的数据目录却认它 ⇒ 设了 `DSH_HOME` 的机器上,
+//   「--db 指向 A、--root 却去扫 B(真机家目录)」,两个默认值自相矛盾(与 lib/host/backfill.js 的
+//   `defaultSessionsRoot()` 是同一处缺陷,同一批统一到 `dshHome()`)。显式 `--root` 覆盖不受影响。
+const sessionsRoot = g('root', join(dshHome(), 'sessions'));
 const dry = args.includes('--dry-run');
 const limit = Number(g('limit', '0')) || 0;
 

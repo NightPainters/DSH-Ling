@@ -188,5 +188,82 @@ check(ownCands.length === 1 && ownCands[0].sessions === 4, 'G4:主人自己的 4
 const M4 = buildReflectMaterial(mem3, { scan: [] });
 check(M4.text.includes('太啰嗦了') && !M4.text.includes('导入的他人对话'), 'G4:回想材料只含主人原话,不含导入内容');
 
+// ── E2(2026-10-01):黑名单免检 → 正向白名单(与概述器共用同一处判据)+ 未知来源 kv 告警 ──────
+// 旧写法:`… AND session_id NOT LIKE 'import:%'`(排除已知的那一个外来命名空间,其余全当真
+// DSH 会话)⇒ 任何没见过的来源都会被当成**主人的**纠正信号,长成"她自己的习惯"。
+// 新判据:只有落在 DSH 宿主命名空间里的裸 id 入选;未知前缀排除**并**写一条 kv 告警。
+const { isDshSessionId, RAW_UNKNOWN_NS_KEY } = await imp('lib/host/summarizer.js');
+const mem4 = new MemoryStore(join(dir, 'm4.db'));
+let seq4 = 0;
+const turn4 = (sid, role, text) => mem4.appendRawTurn(sid, { seq: ++seq4, role, ts: null, model: null, text });
+
+// ① 负对照:白名单内(裸 id)的会话照旧参与扫描 —— 4 个会话、各 1 次「啰嗦」纠正 ⇒ 仍应命中
+turn4('own-a', 'user', '太啰嗦了,说重点');
+turn4('own-b', 'user', '回答太长');
+turn4('own-c', 'user', '废话太多');
+turn4('own-d', 'user', '能不能短点');
+// ② 已知外来 `import:`(他人的对话)⇒ 排除,且不算"未知来源"
+turn4('import:n1', 'user', '导入的他人对话:太啰嗦了');
+turn4('import:n2', 'user', '导入的他人对话:回答太长');
+turn4('import:n3', 'user', '导入的他人对话:废话太多');
+// ③ 自造的未知前缀 `weird:` ⇒ 排除 **且** 留证(kv 告警)
+turn4('weird:n1', 'user', '未知来源:太啰嗦了');
+turn4('weird:n2', 'user', '未知来源:回答太长');
+turn4('weird:n3', 'user', '未知来源:废话太多');
+turn4('weird:n4', 'user', '未知来源:别拽文');
+const e2cands = scanCorrections(mem4);
+check(e2cands.length === 1 && e2cands[0].key === 'verbose', 'E2:恰好 1 条候选(实得 ' + JSON.stringify(e2cands.map((c) => c.key)) + ')');
+check(e2cands[0] && e2cands[0].hits === 4 && e2cands[0].sessions === 4, `E2①:白名单内 4 个会话照旧命中(实得 ${e2cands[0] && e2cands[0].hits} 次 / ${e2cands[0] && e2cands[0].sessions} 会话)`);
+check((e2cands[0]?.samples || []).every((s) => !s.includes('导入') && !s.includes('未知来源')), 'E2②③:import:/weird: 的原话都不进纠正信号(旧黑名单会把 weird: 算成主人的纠正)');
+const rawAlarmH = mem4.kvGet(RAW_UNKNOWN_NS_KEY);
+check(typeof rawAlarmH === 'string' && rawAlarmH.length > 0, 'E2③:习惯扫描也留证未知来源(kv 告警 ' + RAW_UNKNOWN_NS_KEY + ')');
+let alarmH = null; try { alarmH = JSON.parse(String(rawAlarmH)); } catch { alarmH = null; }
+check(!!alarmH && !!alarmH.namespaces?.['weird:'], 'E2③:告警点名 weird:');
+check(!!alarmH && Number(alarmH.namespaces['weird:']?.turns) === 4, 'E2③:告警记了条数(实际 ' + (alarmH && alarmH.namespaces['weird:']?.turns) + ')');
+check(!!alarmH && (alarmH.namespaces['weird:']?.samples || []).includes('weird:n1'), 'E2③:告警带样本 id');
+check(!!alarmH && !alarmH.namespaces['import:'] && !alarmH.namespaces[''], 'E2②③:已知外来与白名单都不入告警(不误报)');
+check(/habit-gen\.(scanCorrections|buildReflectMaterial)/.test(String(alarmH?.where || '')), 'E2③:告警标注了是谁发现的(where=' + String(alarmH?.where) + ')');
+
+// 回想材料的两条查询(COUNT + 分页)也必须走同一判据
+const ME2 = buildReflectMaterial(mem4, { scan: [] });
+check(ME2.stats.turnTotal === 4, 'E2:回想材料的原话总量只数白名单内的会话(实际 ' + ME2.stats.turnTotal + ',应为 4)');
+check(ME2.text.includes('太啰嗦了') && !ME2.text.includes('导入的他人对话') && !ME2.text.includes('未知来源:'), 'E2:回想材料只含主人原话(不含 import:/weird: 内容)');
+check(isDshSessionId('sess-real') && isDshSessionId('own-a') && !isDshSessionId('import:x') && !isDshSessionId('weird:x') && !isDshSessionId('vein:z') && !isDshSessionId(''), 'E2:判据边界(裸 id 入,任何带命名空间前缀者出)');
+
+// ── E3(2026-10-01):来源列落地 —— 判据边界从"id 文本"变成"记录下来的来源" ──────────────────
+// E2 的边界(上一段)是:「将来若出现**不带前缀**的新来源,判据无法分辨」。加 source 列之后分得出来:
+// 下面这台来源就是"不带冒号、只有 source 列认得出它"的那一类(旧判据会把它当主人的纠正信号)。
+// 同时验证半迁移回落:列空的**老行**照旧按裸 id 放行 ⇒ 与修前行为一致。
+const { rawSourceOf, RAW_SOURCE_DSH } = await imp('lib/host/memory.js');
+const mem5 = new MemoryStore(join(dir, 'm5.db'));
+let seq5 = 0;
+const turn5 = (sid, role, text, source) => mem5.appendRawTurn(sid, { seq: ++seq5, role, ts: null, model: null, text, source });
+turn5('own-e3a', 'user', '太啰嗦了,说重点');
+turn5('own-e3b', 'user', '回答太长');
+turn5('own-e3c', 'user', '废话太多');
+turn5('own-e3d', 'user', '能不能短点');
+// 不带冒号的未知来源(自造 'weird-x')—— 只有 source 列认得出它
+turn5('weird-bare-1', 'user', '别的来源:太啰嗦了', 'weird-x');
+turn5('weird-bare-2', 'user', '别的来源:回答太长', 'weird-x');
+turn5('weird-bare-3', 'user', '别的来源:废话太多', 'weird-x');
+turn5('weird-bare-4', 'user', '别的来源:能不能短点', 'weird-x');
+// 半迁移老行:直接 INSERT(不写 source)⇒ NULL ⇒ 回落旧"裸 id"判据,与修前一样参与扫描
+mem5.db.prepare("INSERT INTO dsh_turns_raw (session_id,seq,role,ts,model,text) VALUES ('legacy-h',1,'user',NULL,NULL,'老行(无 source):太啰嗦了')").run();
+const e3cands = scanCorrections(mem5);
+check(e3cands.length === 1 && e3cands[0].key === 'verbose' && e3cands[0].sessions === 5,
+  'E3①④:白名单内 4 个真会话 + 1 条半迁移老行照旧命中(实得 ' + JSON.stringify(e3cands.map((c) => [c.key, c.sessions])) + ')');
+check((e3cands[0]?.samples || []).every((s) => !s.includes('别的来源')), 'E3③:不带冒号的未知来源的原话**不进**纠正信号(旧判据:裸 id = 主人)');
+const ME3 = buildReflectMaterial(mem5, { scan: [] });
+check(ME3.stats.turnTotal === 5, 'E3:回想材料的原话总量 = 5(4 条主人原话 + 1 条半迁移老行;weird-x 的 4 条不计),实际 ' + ME3.stats.turnTotal);
+check(!ME3.text.includes('别的来源'), 'E3:回想材料只含主人原话(不含 weird-x 的内容)');
+let alarm3 = null; try { alarm3 = JSON.parse(String(mem5.kvGet(RAW_UNKNOWN_NS_KEY) || '')); } catch { alarm3 = null; }
+check(!!alarm3?.namespaces?.['weird-x'], 'E3③:告警点名**记录下来的来源名** weird-x(实际键=' + JSON.stringify(Object.keys(alarm3?.namespaces || {})) + ')');
+check(alarm3?.namespaces?.['weird-x']?.by === 'source' && Number(alarm3?.namespaces?.['weird-x']?.turns) === 8,
+  'E3③:告警说清来路(by=source ⇒ 不是靠 id 前缀猜的)+ 条数;条数为 8 = 4 行 × 两个入口'
+  + '(scanCorrections + buildReflectMaterial 各记一遍,同一命名空间**累加** —— 既有口径),条目=' + JSON.stringify(alarm3?.namespaces?.['weird-x']));
+check(!alarm3?.namespaces?.[''] && !alarm3?.namespaces?.['import:'], 'E3:半迁移回落的裸 id 不入告警(不误报)');
+check(rawSourceOf('weird-bare-1') === RAW_SOURCE_DSH && rawSourceOf('import:x') === 'import',
+  'E3:缺省来源推导(裸 id ⇒ ' + RAW_SOURCE_DSH + ';前缀 ⇒ 去尾冒号)');
+
 console.log(ok ? '习惯生成器(A 数出来的 + B 想出来的)全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

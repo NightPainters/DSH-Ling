@@ -7,7 +7,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
 const { MemoryStore } = await imp('lib/host/memory.js');
 const { SettingsFile } = await imp('lib/host/settings-file.js');
-const { ingestFeedbackEntries, applySuggestionAsRule, dismissSuggestion, entriesFromFeedbackFile } = await imp('lib/host/feedback.js');
+const { ingestFeedbackEntries, applySuggestionAsRule, dismissSuggestion, entriesFromFeedbackFile,
+  registerFeedbackListener, entriesFromSessionEvents, FEEDBACK_COMMITTED_EVENT } = await imp('lib/host/feedback.js');
+const { readFileSync } = await import('node:fs');
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-ling-fb-'));
 const db = new MemoryStore(join(dir, 'm.db'));
@@ -80,6 +82,73 @@ check(mapped.length === 2, '文件映射 2 条有效条目,实际 ' + mapped.len
 check(mapped[0].sessionId === 'session-a' && mapped[0].note === '太晦涩', '映射字段正确');
 const ingest = ingestFeedbackEntries(db, mapped);
 check(ingest.queued === 1, '文件条目入队 1(negative 带理由),实际 ' + ingest.queued);
+
+// ── U7(2026-10-01)事件驱动:轮询必须不再回来,推送必须挂在位 ─────────────────
+const srcIndex = readFileSync(join(root, 'lib/index.js'), 'utf8');
+const srcFeedback = readFileSync(join(root, 'lib/host/feedback.js'), 'utf8');
+const srcLifecycle = readFileSync(join(root, 'lib/host/lifecycle.js'), 'utf8');
+
+// 7) 源码级:60 秒轮询与死 sidecar 路径已消失
+check(!srcIndex.includes('feedbackPollSec'), 'index.js 不再有 feedbackPollSec(轮询配置已删)');
+check(!srcIndex.includes('message-feedback.json'), 'index.js 不再读 sidecar 死文件');
+check(!/pollFeedback/.test(srcIndex), 'index.js 不再有 pollFeedback');
+check(!/fbTimer/.test(srcIndex), 'index.js 不再有 fbTimer(定时器已删)');
+check(srcIndex.includes('registerFeedbackListener(ctx, memory)'), 'index.js 挂上了事件驱动的监听');
+
+// 8) 源码级:订阅在位(事件名钉死;改错名这条会红)
+check(FEEDBACK_COMMITTED_EVENT === 'feedback/committed', '事件名常量 = feedback/committed');
+check(srcFeedback.includes("ctx.on(FEEDBACK_COMMITTED_EVENT") && srcFeedback.includes("ctx.on('session/event'"),
+  'feedback.js 订了 feedback/committed + session/event 两条');
+check(!/setInterval\s*\(\s*poll/.test(srcFeedback), 'feedback.js 里没有残留轮询');
+// lifecycle 那侧:feedback/* 必须被放行,否则事件到不了下游
+check(/type === 'feedback\/message-put'/.test(srcLifecycle), 'lifecycle.js 放行 feedback/message-put');
+
+// 9) 行为级:喂一条 feedback/committed ⇒ 处理路径真的被走到(假 ctx)
+const dispatched = [];
+const fakeCtx = { on: (name, fn) => { dispatched.push(name); return () => { const i = dispatched.indexOf(name); if (i >= 0) dispatched.splice(i, 1); }; } };
+const disposeFb = registerFeedbackListener(fakeCtx, db);
+check(dispatched.includes('feedback/committed') && dispatched.includes('session/event'),
+  '注册后两条订阅都在位,实际: ' + JSON.stringify(dispatched));
+const beforePush = db.overviewById('dsh', 'sess-hit').hit_count;
+const makeInspection = () => ({
+  meta: { id: 'sess-hit' },
+  inheritedEventCount: 0,
+  events: [
+    { type: 'assistant/message', seq: 0, data: {} },
+    { type: 'feedback/message-put', seq: 1, data: { sessionId: 'sess-hit', item: { messageId: 'am9', rating: 'positive', version: 'v1', createdAt: 5 } } },
+  ],
+});
+// 直接从假 ctx 找回 handler:注册时拿到的那个
+const handlers = new Map();
+const ctx2 = { on: (name, fn) => { handlers.set(name, fn); return () => handlers.delete(name); } };
+const disposeFb2 = registerFeedbackListener(ctx2, db);
+const committedHandler = handlers.get('feedback/committed');
+check(typeof committedHandler === 'function', '拿到 feedback/committed handler');
+committedHandler(makeInspection());
+check(db.overviewById('dsh', 'sess-hit').hit_count === beforePush + 1,
+  '推送到达 ⇒ 点赞热度 +1: ' + beforePush + '→' + db.overviewById('dsh', 'sess-hit').hit_count);
+check(!!db.kvGet('feedback.last'), 'feedback.last 记账写了');
+// 幂等:同一条再投递一次,不重复处理
+committedHandler(makeInspection());
+check(db.overviewById('dsh', 'sess-hit').hit_count === beforePush + 1, '同事件重放不重复加权');
+// 宿主 no-op append 也会发这个通知:末条不是 put ⇒ 不许处理
+committedHandler({ meta: { id: 'sess-hit' }, inheritedEventCount: 0, events: [{ type: 'assistant/message', seq: 0, data: {} }] });
+check(db.overviewById('dsh', 'sess-hit').hit_count === beforePush + 1, '空提交(no-op)不产生副作用');
+// update 语义:同一个 messageId 改评级 → 当前值以末条为准
+const upd = entriesFromSessionEvents('sx', [
+  { type: 'feedback/message-put', data: { sessionId: 'sx', item: { messageId: 'm1', rating: 'positive' } } },
+  { type: 'feedback/message-put', data: { sessionId: 'sx', item: { messageId: 'm1', rating: 'negative', note: '改主意' } } },
+]);
+check(upd.length === 1 && upd[0].rating === 'negative' && upd[0].note === '改主意', '重放后取当前值(put 覆盖)');
+// delete 语义:同 messageId 的 delete 抹掉该条
+const deld = entriesFromSessionEvents('sx', [
+  { type: 'feedback/message-put', data: { sessionId: 'sx', item: { messageId: 'm1', rating: 'positive' } } },
+  { type: 'feedback/message-delete', data: { sessionId: 'sx', messageId: 'm1' } },
+]);
+check(deld.length === 0, 'delete 后当前条目为空');
+disposeFb2();
+disposeFb();
+check(handlers.size === 0, '卸载函数退订生效');
 
 console.log(ok ? 'feedback 全部通过 ✓' : '存在失败');
 process.exitCode = ok ? 0 : 1;

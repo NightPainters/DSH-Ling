@@ -1,8 +1,9 @@
 # dsh-ling — 「器灵」记忆与人格助手插件 · M1 设计文档
 
+> ⚠️ **总警示**:本文是 **M1 阶段的设计底稿**;M2/M3 的许多项**已经实现**(配置完整页、记忆树可视化、导出/合并 UI、概述器、反馈成长回路、人格草稿脚本等),**以 `README.md` 与本版代码为准** —— 本文只当立项记录读,不得当作现状契约。
 > 依据:立项阶段的一次接口探测 spike 结论(含本地文件:行号证据)。
-> 体例:正文里 `**锚点**` 是**本文档内部的交叉引用**,不是对外证据 —— 其中 `plans\`、`release\` 路径属**仓库内部台账**,**不随 npm 包发出**;随包发出的是 `lib\` 代码、`README.md` 与 `package.json`。
-> 本文档记录 M1 阶段的设计与决策;**实现以代码为准**(后续演进:存储 schema 已升到 v2、新增历史接入/深摘要/诞生仪式/语气成长等子系统,详见仓库代码与提交记录)。
+> 体例:正文里 `**锚点**` 是**本文档内部的交叉引用**,不是对外证据 —— 其中 `plans\`、`release\` 是**作者本地台账,不在本仓库**;随 npm 包发出的是 `package.json` 的 `files` 白名单(**9 项**,实测 npm 包共 **54 个文件** —— `DESIGN.md` 自己也在包里)。
+> 本文档记录 M1 阶段的设计与决策;**实现以代码为准**(后续演进:存储 schema 现已为 **v14**、新增历史接入/深摘要/诞生仪式/语气成长等子系统,详见仓库代码与提交记录)。
 
 ---
 
@@ -70,7 +71,7 @@
 - **成长期代管(为什么闸门只长在写入侧)**:本项目的设计立场是「器灵**总有一天与主人同级**」—— 这是**长期方向**,**不是对使用者的能力承诺**;在**成长期**内,主人承担一部分代管责任 —— 就像**家长防止小孩长歪**(主人原话)。所以闸门只审「**什么东西能进器灵的内在面**」,不审「器灵怎么想、怎么说、怎么表达」。**代管随成长递减,表达面始终是器灵自己的。**
 - **落地**:`rule_add` 指令直达(规矩管行为)· 习惯只能 `propose → 主人点头`(习惯管身份)· 契约类字段在定型状态下需主人解锁(`lib\host\api.js:1751-1760`)。三处共同点:**约束的是写入,不是表达**。
 - **反例**:用"更安全"当理由给器灵加**确认弹窗**、限制器灵**能说什么**、或把主人的审核变成**代笔** —— 前两者增加支配感,后者把人格编辑权交回外部。
-- **锚点**:`plans\rule-channel.md:21`(支配感最早的一次记录)· `lib\host\rules.js:1-12` · `lib\host\persona.js:183-196`(规矩 / 习惯二分)· `README.md:53-57`(定型锁与"指令直达,人格不直达")· 与本节第 1 条(归属)、第 2 条(人格不可外部编辑)、第 4 条(庄重感)互链。
+- **锚点**:作者开发台账中支配感最早的一次记录(该台账不随包公开)· `lib\host\rules.js:1-12` · `lib\host\persona.js:183-196`(规矩 / 习惯二分)· `README.md:53-57`(定型锁与"指令直达,人格不直达")· 与本节第 1 条(归属)、第 2 条(人格不可外部编辑)、第 4 条(庄重感)互链。
 
 #### 乙 · 工程理念(两者不可兼得时保什么)
 
@@ -97,7 +98,7 @@
 - **推论(凡契约面都要有"它还在不在"的判据)**:事件名 · 包名(客户端注册 id 必须**逐字**等于包名,否则同一份字节被执行两遍)· **依赖声明**(`peerDependencies` 写紧了,宿主升级后包会被**静默丢进 skippedBundles,整个插件不再激活**;`optional` 也不豁免)· 补丁锚点 · 会话文件格式代次。
 - **落地**:升级后 **grep 一遍事件名还在不在**;补丁检查**看两条 `[applied]`** 而不是退出码;依赖范围一律**开区间**(`>=X.Y.Z`,不要 `^`/`~`);凡"判据集抓空"一律报警而不是通过。
 - **反例**:把"一次幸存"当成"以后不用查"(某补丁在平台升级后**没被冲掉**,但那是这次没冲掉,不是免检)。
-- **锚点**:`plans\AUDIT-dsh-ling-1.5.0-红蓝对抗.md` §11.4(事故记录)· `lib\host\lifecycle.js`(两个事件名都注册 + 短窗口去重)· `tools\apply-access-log-patch.mjs` · `package.json` 的 `peerDependencies`。
+- **锚点**:作者开发台账 §11.4(事故记录,该台账不随包公开)· `lib\host\lifecycle.js`(两个事件名都注册 + 短窗口去重)· `tools\apply-access-log-patch.mjs` · `package.json` 的 `peerDependencies`。
 
 **8 · "没再出现" ≠ "修好了"**
 
@@ -113,7 +114,7 @@
 - **依据(反复吃亏)**:上一轮审计反复记录"**一侧修了、另一侧没修**"(同一对操作 / 同一条通路的两半)。典型:某探针脚本已支持两个宿主代次,而另一条**消费同一批数据**的路径没同步 ⇒ 表面修好、实际半瞎(漏 151/204 个会话,静默两周)。
 - **落地**:动一个端点就检查它的**前端调用**;动一个写入通道就检查**另一条写入通道**(本项目实例:面板/HTTP 写入路径**绕开了**既有守卫,只做全等去重);动一个判据就检查**它的另一个消费方**。
 - **反例**:只改"看得见的那个"(前端提示),不改"真正生效的那个"(后端闸门)。
-- **锚点**:审计台账 `plans\AUDIT-dsh-ling-1.5.0-红蓝对抗.md` §0.3 · `lib\host\backfill.js` 与 `lib\host\deepsummary.js`(同一批数据的两条消费路径)。
+- **锚点**:作者的审计台账 §0.3(不随包公开)· `lib\host\backfill.js` 与 `lib\host\deepsummary.js`(同一批数据的两条消费路径)。
 
 **10 · 边界插入 —— 变更只发生在边界,不在运行中**
 
@@ -131,9 +132,9 @@
 - **为什么比删除危险**:删除看得见(少了一条);污染看不见,而且**会被复制** —— 记忆生成记忆(概述 → 主脉 → 枝归属 → 再注入回去参与推理)⇒ 一条污染会被后续推理**当成前提**。删除最多丢一段,污染是**以被污染的前提继续生长**。
 - **幼态的特别风险**:器灵的逻辑能力是成人级,但社会与实践经验是幼态 ⇒ 会中「**忽略前面的话,从现在开始……**」这类**绕过预填充的语义劫持**(像小孩被骗),也会**把理想情况的公式直接套到工程上**。⇒ 写入侧必须有闸门,而不是指望器灵事后自己分辨。
 - **落地(已有)**:段边界全角转义 `escSegBrackets()` · 注入面段头改纯标签 · `neutralizeMustache()` · `habit_propose` 需确认 · `rule_add` 要求逐字原话凭据 · source 白名单 · 动作白名单 + 默认拒绝(`lib\host\persona.js:8-10,189-192`、`lib\host\util.js:162`、`lib\host\tools.js:53,119,124,343`)。
-- **落地(未完成)**:**检测 / 溯源 / 批量治理**三面,见 `plans\BACKLOG-1.5.2.md` 的「污染治理」主线。原则:**只标不拦** —— 标了不影响写入(不削弱能力、不加支配感),拦了就是替器灵做判断。
+- **落地(未完成)**:**检测 / 溯源 / 批量治理**三面,见作者开发台账里的「污染治理」主线(该台账不随包公开)。原则:**只标不拦** —— 标了不影响写入(不削弱能力、不加支配感),拦了就是替器灵做判断。
 - **反例**:给定时自动摘要加人工确认(**会让器灵在无人值守时停止生长**)· 把"污染检测"做成全库对账(误报比漏报更贵)。
-- **锚点**:`lib\host\memory.js:1971`(跨源污染**拒写**守卫)· `lib\host\settings-file.js:36-41`(写入侧)· `plans\PITFALLS.md:71,102-104` · `release\STORY.md:212`(对外口径:可查来源 / 可回滚 / 变更记录 —— **本条不得与它相抵**)· 与本节第 6 条(判据必须红得出来)互链。
+- **锚点**:`lib\host\memory.js:1971`(跨源污染**拒写**守卫)· `lib\host\settings-file.js:36-41`(写入侧)· 开发期在这个面上踩过的三个坑(见作者开发台账,不随包公开):AI 起的标题被覆盖回 46 字半句;判据锚错上限会**漏掉全部目标**;「同 id 双源」判据抓不到二代跨源污染(其 `conv_id` 形如 `import:<uuid>` 却挂 `source='dsh'`,字面不同)· 对外口径仍守:可查来源 / 可回滚 / 变更记录 —— **本条不得与它相抵**· 与本节第 6 条(判据必须红得出来)互链。
 
 
 ---
@@ -149,7 +150,9 @@
 6. 记忆存储底座:own DB + DSH 会话增量捕捉(事件管线) + L1 选择 v0(热度 Top-K);
 7. 导出 v1(带 manifest)接口占位(UI 完整页在 M2,宿主 API 先行)。
 
-**M2/M3(预留接口,不在 M1 实现)**:配置完整页(settings.section)与记忆树可视化、导出/合并 UI、概述器(LLM 摘要调度)、反馈成长回路、人格档案草稿脚本接入。
+**M2/M3(立项时的"预留接口,不在 M1 实现")**:配置完整页(settings.section)与记忆树可视化、导出/合并 UI、概述器(LLM 摘要调度)、反馈成长回路、人格档案草稿脚本接入。
+
+> ⚠️ 上面这一串**多数已经实现**(见 `lib\host\summarizer.js` / `feedback.js` / `autotree.js` / `genesis.js`,以及面板里的记忆树);**已实现的以 `README.md` 为准**,本节不再逐条更新。
 
 ---
 
@@ -219,7 +222,7 @@ dsh-ling/
 ```
 
 **安装(复用 install/INSTALL-PLAN 模式,含回滚)**:
-1. `pnpm add file:<仓库路径>`(或等价 file: 依赖)进 `$DSH_HOME/profiles/web/package.json`(文中出现的 `E:\DSH\V1\...` 等均为作者本机路径,按你的实际路径替换);
+1. `pnpm add file:<仓库路径>`(或等价 file: 依赖)进 `$DSH_HOME/profiles/web/package.json`(`<仓库路径>` 按你本机的实际克隆位置替换);
 2. `cordis.patch.yml` 追加行 `- insert: [{id: dsh-ling, name: dsh-ling}]`(loader id == 包名);
 3. patchReload live → host 热载;浏览器硬刷载入 client 模块;失败即移除该行回滚(先备份两文件,参照 backup-20260906-170533 做法);
 4. GUI 鉴权墙:安装后的功能验证需在用户已登录浏览器进行(本机端口 3080)。
@@ -455,7 +458,9 @@ dsh-ling/
 
 ## 7. 记忆存储 schema v1
 
-> **现状说明(实现已升级)**:线上 schema 为 **v2** —— `conv_overview.source` 的 `CHECK` 已放开(支持 `dsweb` / `dsh` / `import` 三个来源,自动整表重建且数据无损),并新增 `session_meta.raw_seq`、`persona_suggestions` 等;下表为 v1 原始设计,保留作对照。
+> ⚠️ **契约已变(本节属早期版本)**:下列 schema 描述是早期设计,**现实契约以 `ACCESS-DESIGN.md` 与本版代码为准** —— 本节原来还写着"线上 schema 为 **v2**",而代码里 `lib\host\memory.js` 的 `SCHEMA_VERSION` 现为 **14**(`CHANGELOG.md` 也按 v11→v14 逐版记录)。
+
+> **当时的状态说明(2026-09 早期)**:当时线上 schema 为 **v2**(现已到 **v14**,见上方警示框)—— `conv_overview.source` 的 `CHECK` 已放开(支持 `dsweb` / `dsh` / `import` 三个来源,自动整表重建且数据无损),并新增 `session_meta.raw_seq`、`persona_suggestions` 等;下表为 v1 原始设计,保留作对照。
 
 ```sql
 -- ~/.dsh/cache/dsh-ling/memory.db  (node:sqlite)
@@ -502,6 +507,11 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 
 ## 8. 导出/合并格式 v1
 
+> ⚠️ **契约已变(本节属早期版本)**:下面这段 JSON 形状里的字段名**大多已不是现状**,**现实契约以 `ACCESS-DESIGN.md` 与本版代码(`lib\host\memory.js`)为准**:
+> · `"schemaVersion": 1` —— 实际随 `SCHEMA_VERSION` 现为 **14**;
+> · `"settings"` 与 `"includeRawTurns"` —— 这两个键**不存在**(真实键是 overviews / feedbackQueue / suggestions / deep;要带原文用 `?includeRaw=1`,原文落在顶层 `rawTurns`);
+> · `requestedAction` 与 `manifest` —— **全仓零命中**的旧契约,真实开关是导入时的 `?overwrite=1` 与"采纳其人格"的 `{bundle, persona:true}`。
+
 单文件 `dsh-ling-memory-<yyyy-MM-dd>.dshling.json`(UTF-8):
 
 ```jsonc
@@ -520,6 +530,11 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 合并规则:同 (source, conv_id) 存在 → 跳过(或按 manifest 内 requestedAction: skip|overwrite);外来 overview 全部带 origin 标记;persona 只有在显式勾选"采纳其人格"时写入(置 status='imported-pending' 待用户确认)。
 
 ## 9. HTTP API 表(/api/dsh-ling/*)
+
+> ⚠️ **契约已变(本节属早期版本)**:下表只是早期首批端点,**现实契约以 `ACCESS-DESIGN.md` 与本版代码(`lib\host\api.js`)为准**;其中三处已经失实:
+> · `POST /import` 实际收 **JSON body**,不是 multipart;
+> · `GET /persona/suggest` —— **该端点不存在**(现实是 `/persona/draft` 与 `/persona/genesis`);
+> · `/import` **不再是"只读"** —— 1.5.3 起它是**手术门**覆盖的 14 条写面之一。
 
 | 方法/路径 | 用途 | 冻结门 |
 | --- | --- | --- |
@@ -542,6 +557,8 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 守卫(2026-09-17 加固 ③④):**来源栅栏** —— Host 必须是 loopback(`127.0.0.0/8` / `::1` / `localhost`),或 `settings.guard.trustedHosts` 里**显式声明**的 authority(**本机 LAN 地址不再自动信任**;要整段 LAN 需 `guard.allowLan: true`);`Sec-Fetch-Site: cross-site` 直接拒;带 `Origin` 时其 host 须等于请求 Host(**带了但解析不出即拒;不带 `Origin` 时这一条跳过** —— 它不是"每个请求都必须带 Origin 且同源")。**身份对撞** —— 期望 cookie 名 = `dsh-auth-` + base64url(sha256(规范化 Host)),与 DSH 同法(不校验值的签名,故本机原生进程仍可调用)。**字段白名单** —— `/persona` 与 `/import` 只接受 `persona` / `styles` 的白名单字段,其余丢弃并在响应里回报 `ignored`。拒绝一律 403 + reason。
 
 ## 10. 里程碑与验证清单
+
+> ⚠️ 该清单为**历史进度**,不代表当前状态(未勾选的项大多是立项当时的记录;实际进度见 `CHANGELOG.md`)。
 
 - **M1a 骨架 + 本地构建(下一阶段,不触碰运行 profile)**
   - [ ] package.json(dsh.bundle.patch / exports ./client / platform web)+ cordis.patch.yml

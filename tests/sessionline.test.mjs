@@ -3,15 +3,19 @@
 //             档位 = **D+C**(只在 step===1 的轮次边界考虑 + 内容真变了才追加;旧 T/K 双门已废)/
 //             内容闸三判据(逐字节原文 / lastMd5 / 实质键) / 面上没有我们的行时必须补一条 /
 //             dupes 只留痕不写历史 / `sessionLinePreview` 纯只读且判定不依赖 turn。
+//   + 2026-10-01:内容闸那三条**只有一处实现**(`contentChanged`),写路径与预览**共用** ——
+//     预览曾少一条(md5)⇒ 同一份状态两种读数(见 §19);E1 的两处 `TITLE_MAX_CHARS` 是**不同语义**
+//     (生成上限 vs 显示兜底),不统一,但有"显示兜底 ≥ 生成上限"的不变式(见 §18)。
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
 const {
-  SESSION_LINE_SOURCE, TIER_MS_DEFAULT, TIER_TURNS_DEFAULT, LINE_MAX_CHARS, PROGRESS_MAX_CHARS,
+  SESSION_LINE_SOURCE, TIER_MS_DEFAULT, TIER_TURNS_DEFAULT, LINE_MAX_CHARS, PROGRESS_MAX_CHARS, TITLE_MAX_CHARS,
   KV_LAST, KV_COUNTS, KV_DUPES, KV_ERR,
   progressLine, buildSessionLineText, scanSessionLineSurface, tierPass, decideSessionLine, md5,
-  progressKey, maybeSessionLine, createSessionLineHandler, sessionLineProbe, sessionLineState, sessionLinePreview,
+  progressKey, contentChanged, maybeSessionLine, createSessionLineHandler, sessionLineProbe, sessionLineState,
+  sessionLinePreview,
 } = await imp('lib/host/session-line.js');
 const { selectL1 } = await imp('lib/host/l1.js');
 
@@ -523,6 +527,111 @@ const runTurn = async ({ h, live, memory, turn, messages = [userMsg()], base = 1
   const brokenState = sessionLineState({ kvGet: () => { throw new Error('boom'); } }, SID, { turn: 5 });
   check(brokenState !== null && typeof brokenState === 'object', 'sessionLineState 读口抛错也不崩(实为 ' + (brokenState === null ? 'null' : 'object') + ')');
   check(sessionLineState(memory, '', { turn: 1 }) === null, 'sessionLineState 空 id ⇒ null(带 opts 也不炸)');
+}
+
+// ---------------- 18. E1:`TITLE_MAX_CHARS` 同名不同值 = **不同语义**(判定 + 不变式) ----------------
+//   判定(2026-10-01):`retitle.js` 的那个是**生成上限**(`heuristicTitle` 切句读/硬截的落点 ——
+//   它决定"机器造出来的标题最长多少字"),本模块这个是**显示兜底**(`resolveTitle` 把**任何来源**的标题
+//   夹进那一行:除本机生成外还有源库自带标题、主人手改 ≤120)。两处的读者与方向都不同
+//   ⇒ **不硬统一**(只补注释,见两个文件里的常量注释);但有一条不许破的不变式:
+//   **显示兜底 ≥ 生成上限** —— 否则机器刚造出来的标题会在那一行里被再切一刀。
+{
+  const { TITLE_MAX_CHARS: GEN_MAX, heuristicTitle } = await imp('lib/host/retitle.js');
+  const SETTINGS_E1 = { get: () => ({ memory: { sessionProgressLine: true } }) };
+  check(typeof TITLE_MAX_CHARS === 'number' && typeof GEN_MAX === 'number',
+    'E1 两处同名常量都可读(本模块 ' + TITLE_MAX_CHARS + ' / retitle ' + GEN_MAX + ')');
+  check(TITLE_MAX_CHARS !== GEN_MAX,
+    'E1 实测:**同名不同值**(' + TITLE_MAX_CHARS + ' vs ' + GEN_MAX + ')—— 属不同语义,不统一');
+  check(TITLE_MAX_CHARS >= GEN_MAX,
+    '★E1 不变式:显示兜底(' + TITLE_MAX_CHARS + ')必须 ≥ 生成上限(' + GEN_MAX + '),否则机器造的标题会在那一行里被再切一刀');
+  // 生成侧:启发式造出来的标题不超生成上限
+  const gen = heuristicTitle('把弹簧的阻尼再调大一档试试，然后看落点偏移量是不是收敛，再记录每一次的峰值位置与收敛速度，最后整理成一份对照表并复核一遍');
+  check(!!gen && gen.length <= GEN_MAX, '★E1 生成侧:启发式标题不超生成上限(实测 ' + (gen || '').length + ' ≤ ' + GEN_MAX + ')');
+  // 显示侧:兜底确实把 70 字标题夹到 60 字(超出留 …)—— 钉住"显示兜底"这个语义本身
+  const LONG70 = '标'.repeat(70);
+  const pvLong = sessionLinePreview(fakeMemory({ title: LONG70 }), SETTINGS_E1, SID, { turn: 4 });
+  check(typeof pvLong.text === 'string' && pvLong.text.includes('标'.repeat(TITLE_MAX_CHARS - 1) + '…'),
+    '★E1 显示兜底 = ' + TITLE_MAX_CHARS + ' 字(超出留 …;实测 ' + JSON.stringify(String(pvLong.text).slice(0, 24)) + ')');
+  check(!String(pvLong.text).includes('标'.repeat(TITLE_MAX_CHARS)),
+    '★E1 确实切了(那一行里不出现 ' + TITLE_MAX_CHARS + ' 个连续「标」)');
+  // 两条路的值虽不同,却不冲突:生成上限以内的标题**逐字穿过**那道显示兜底
+  const genTitle = '生'.repeat(GEN_MAX);
+  const pvGen = sessionLinePreview(fakeMemory({ title: genTitle }), SETTINGS_E1, SID, { turn: 4 });
+  check(String(pvGen.text).includes(genTitle),
+    '★E1 生成上限以内(' + GEN_MAX + ' 字)的标题逐字穿过显示兜底(两条路不冲突)');
+}
+
+// ---------------- 19. C 组:预览与写路径的「内容真变了」判据**同一处**(不再各写一份) ----------------
+//   旧状:`maybeSessionLine` 内联 3 条(逐字节 / md5 / 实质键),`sessionLinePreview` 只内联 2 条(缺 md5)
+//   ⇒ 同一份状态能出现两种读数:kv 记着 md5 而 `last.text` **缺失**(或与 kv 那条不同源 —— 预览的
+//     逐字节基准是"面上那条")时,预览说"会追加"、写路径判 same ⇒ **读数与行为不一致**。
+//   修法:两条路都调 `contentChanged()`。下面既钉**调用点同源**(源码形态),也钉**行为一致**(含那个角落)。
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(join(root, 'lib/host/session-line.js'), 'utf8');
+  check(/export function contentChanged\(/.test(src), '★C 判据只有一处实现(导出 contentChanged)');
+  check(/const changed = contentChanged\(\{ candidate, lastText: st\.text/.test(src),
+    '★C 源码形态:**写路径**走 contentChanged(不再内联三条)');
+  check(/const judge = contentChanged\(\{/.test(src), '★C 源码形态:**预览**走同一个 contentChanged(不再内联两条)');
+  check(!/const changed = !\(textUnchanged \|\|/.test(src), '★C 源码形态:写路径的旧内联判据已不存在');
+  check(!/const textUnchanged = scan\.count === 1/.test(src), '★C 源码形态:预览的旧内联判据已不存在');
+  // 单元:三条判据各自都能单独说"没变"(**缺任何一条**都会让两条路分叉)
+  const cand = '候选正文';
+  check(contentChanged({ candidate: cand }).changed === true, 'C 空记录 ⇒ 判"变了"');
+  check(contentChanged({ candidate: cand, lastText: cand }).changed === false, 'C 判据①逐字节能挡');
+  check(contentChanged({ candidate: cand, lastMd5: md5(cand) }).changed === false, 'C 判据②md5 能挡(**预览旧写法缺的就是这条**)');
+  check(contentChanged({ candidate: cand, curKey: 'k', lastKey: 'k' }).changed === false, 'C 判据③实质键能挡');
+  check(contentChanged({ candidate: cand, lastMd5: md5('别的') }).changed === true, 'C 负对照:md5 不同 ⇒ 仍判"变了"');
+
+  // ── 角落:kv 有 md5、`text` 缺失(逐字节那条不参与)⇒ 两条路必须**同判 same** ──
+  const SETTINGS_C = { get: () => ({ memory: { sessionProgressLine: true } }) };
+  const realNow = Date.now;
+  Date.now = () => NOW; // 冻住钟:预览与写路径的候选正文才逐字节可比
+  try {
+    const live = liveAgent();
+    live.put(61, '上一次那条的正文(与本次候选不同 ⇒ 逐字节那条不参与)'); // ⚠️ 先摆我们的行(`put` 会把面重置成 [seq])
+    live.putUser(60, USER_TEXT);                                        // 再追加真人发言 ⇒ nodes = [61, 60]
+    // 预览的判定基准 = **无轮次版**正文(面板路径没有 turn)⇒ 两条路共用同一个串,才叫"同一输入"
+    const judge = buildSessionLineText({ title: TITLE, progress: progressLine(USER_TEXT), ordinal: 2, at: NOW });
+    // kv 记录:`text` 缺失、`md5` 尚存;`seq` 非 null ⇒ 不走 seq 自愈(自愈会用面上那条覆盖 md5)
+    const st = { at: NOW, turn: 0, appendCount: 1, seq: 61, text: '', md5: md5(judge), key: '' };
+    const memory = fakeMemory();
+    memory.kvSet(KV_LAST + SID, JSON.stringify(st));
+    memory.session = live.agent.session; // 预览只能从 `memory.session` 拿面
+    const before = snapOf(memory);
+    const pv = sessionLinePreview(memory, SETTINGS_C, SID, { turn: 0 });
+    check(snapOf(memory) === before, 'C 预览仍零写 kv');
+    const wr = maybeSessionLine({
+      memory,
+      agent: live.agent,
+      payload: payloadOf({ agent: live.agent, turn: 0, messages: [userMsg(USER_TEXT)] }),
+      stateMap: new Map([[SID, { ...st }]]),
+      now: NOW,
+    });
+    check(pv.blocked === 'same' && pv.wouldAppend === false,
+      '★★C 角落(text 缺失 + md5 尚存):**预览**判 same / 不追加(实测 blocked=' + pv.blocked + ';修前 = ok)');
+    check(wr.action === 'skip' && wr.reason === 'same', '★★C 角落:**写路径**同样判 same(实测 ' + wr.action + '/' + wr.reason + ')');
+    check(pv.blocked === wr.reason && pv.wouldAppend === (wr.action === 'append'),
+      '★★C 两条路对**同一输入**给同一结论(' + pv.blocked + ' vs ' + wr.reason + ' / wouldAppend=' + pv.wouldAppend + ')');
+    // 负对照:进展变了 ⇒ 两条路都必须说"追加"(证明上面不是"两边都恒判 same")
+    const live2 = liveAgent();
+    live2.put(61, '上一次那条的正文');
+    live2.putUser(60, '全新的方向:改看速度曲线。');
+    const memory2 = fakeMemory();
+    memory2.kvSet(KV_LAST + SID, JSON.stringify(st));
+    memory2.session = live2.agent.session;
+    const pv2 = sessionLinePreview(memory2, SETTINGS_C, SID, { turn: 0 });
+    const wr2 = maybeSessionLine({
+      memory: memory2,
+      agent: live2.agent,
+      payload: payloadOf({ agent: live2.agent, turn: 0, messages: [userMsg('全新的方向:改看速度曲线。')] }),
+      stateMap: new Map([[SID, { ...st }]]),
+      now: NOW,
+    });
+    check(pv2.blocked === 'ok' && pv2.wouldAppend === true, 'C 负对照:进展变了 ⇒ 预览判 ok(实测 ' + pv2.blocked + ')');
+    check(wr2.action === 'append' && wr2.reason === 'ok', 'C 负对照:进展变了 ⇒ 写路径判 ok(实测 ' + wr2.reason + ')');
+    check(pv2.blocked === wr2.reason, 'C 负对照:两条路结论仍一致(' + pv2.blocked + ' vs ' + wr2.reason + ')');
+  } finally { Date.now = realNow; }
 }
 
 console.log(ok ? '活行(session-line)全部通过 ✓' : '存在失败 ✗');

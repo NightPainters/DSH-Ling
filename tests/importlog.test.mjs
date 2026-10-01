@@ -136,5 +136,130 @@ check(lineDsweb.includes('网页端库扫描') && lineDsweb.includes('源库 152
 const lineUnknown = formatLogLine({ at, kind: 'weird', newRows: 1, refreshed: 0 });
 check(lineUnknown.includes('文件导入'), '未知 kind 退回文件导入样式');
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 8) #10(2026-09-29):被跳过的"单条过大"进账 —— **跳过 ≠ 失败**
+// ---------------------------------------------------------------------------
+// 判据:① `tooBig: 0` ⇒ 落的账**逐字不变**(值 + 键序 + 不新增字段 —— 负对照);
+//       ② `tooBig > 0` ⇒ 入账,展示行末尾多出「· 单条过大 N」,位置在"失败 X 批"之后;
+//       ③ 同一 runId 多次上报**累加**,且累加后仍夹在护栏内(名字最多 5 条);
+//       ④ 护栏生效:`tooBig` 夹 0..10000;`tooBigNames` 前 5 条 / 每条 ≤40 字 / 非字符串丢弃;
+//       ⑤ **命门**(必须在**端点**上验):只报 `tooBig` ⇒ 账本里 `errors` **不增长**。
+//    ⚠️ ⑤ 为什么非走端点:强制 ≥1 的那句 `Math.max(1, ...)` 住在 `api.js` 的 `/import/log` 里,
+//       账本层从不自己发明 `errors` —— 只测 `logImport()` 等于没测到那条命门(这正是修前的样子)。
+import { EventEmitter } from 'node:events';
+const { cleanTooBig, cleanTooBigNames, TOO_BIG_MAX, TOO_BIG_NAMES_MAX, TOO_BIG_NAME_CHARS } =
+  await imp('lib/host/import-log.js'); // 同一模块(ESM 缓存),只是把新导出取过来
+
+// ── ① 负对照:带 `tooBig: 0` 落账 ⇒ 与"压根不提这俩字段"逐字相同 ─────────────
+const mem10 = new MemoryStore(join(dir, 'm10.db'));
+const B10 = NOW - 10 * 60 * 1000;
+const k10a = logImport(mem10, { at: B10, kind: 'file', name: 'a.json', newRows: 3, refreshed: 1, errors: 1 });
+const k10b = logImport(mem10, { at: B10 + 1000, kind: 'file', name: 'a.json', newRows: 3, refreshed: 1, errors: 1, tooBig: 0, tooBigNames: [] });
+const rec10a = JSON.parse(mem10.kvGet(k10a));
+const rec10b = JSON.parse(mem10.kvGet(k10b));
+for (const r of [rec10a, rec10b]) { r.at = 0; r.startedAt = 0; r.updatedAt = 0; } // 时间戳天然不同,归一后比其余部分
+const same10 = JSON.stringify(rec10a) === JSON.stringify(rec10b);
+console.log('    ① tooBig:0 与"不提这俩字段"逐字相同 = ' + same10 + ' · 键序=' + Object.keys(rec10b).join(','));
+check(same10, 'tooBig:0 ⇒ 账本逐字不变(值与键序都不变)');
+check(!('tooBig' in rec10b) && !('tooBigNames' in rec10b), 'tooBig:0 ⇒ 不新增字段(没跳过就不留痕)');
+
+// ── ② 展示行:末尾追加「· 单条过大 N」,在"失败 X 批"之后 ────────────────────
+const line10 = formatLogLine({ at, kind: 'file', name: 'big.json', newRows: 1379, refreshed: 42, errors: 1, batches: 7, tooBig: 3 });
+const line10no = formatLogLine({ at, kind: 'file', name: 'big.json', newRows: 1379, refreshed: 42, errors: 1, batches: 7 });
+console.log('    ② 含跳过:' + line10);
+console.log('       无跳过:' + line10no);
+check(line10.includes('· 单条过大 3'), '行含「· 单条过大 3」');
+check(line10.indexOf('单条过大') > line10.indexOf('失败 1 批'), '它在"失败 X 批"**之后**(跳过不是失败,排在失败之后)');
+check(line10 === line10no + ' · 单条过大 3', '只在末尾追加这一段,既有部分逐字不变');
+check(!formatLogLine({ at, kind: 'file', newRows: 1, refreshed: 0, tooBig: 0 }).includes('单条过大'), 'tooBig:0 ⇒ 行里不出现「单条过大」');
+
+// ── ③ 同一 runId 累加(与 errors 同语义),累加后仍夹在护栏内 ────────────────
+const mem10r = new MemoryStore(join(dir, 'm10r.db'));
+logImport(mem10r, { runId: 'run-10', at: B10, kind: 'file', name: 'big.json', tooBig: 2, tooBigNames: ['会话甲'] });
+logImport(mem10r, { runId: 'run-10', at: B10 + 500, kind: 'file', tooBig: 1, tooBigNames: ['会话乙'] });
+const rec10r = listImportLog(mem10r)[0];
+check(rec10r.tooBig === 3, '两次上报累加为 3,实测 ' + rec10r.tooBig);
+check((rec10r.tooBigNames || []).join(',') === '会话甲,会话乙', '名字累加(先来先留),实测 ' + JSON.stringify(rec10r.tooBigNames));
+check(!rec10r.errors, '账本层不发明 errors:只报跳过 ⇒ errors 仍是 0,实测 ' + rec10r.errors);
+logImport(mem10r, { runId: 'run-10', at: B10 + 900, kind: 'file', tooBig: 1, tooBigNames: ['丙', '丁', '戊', '己'] });
+const rec10r2 = listImportLog(mem10r)[0];
+console.log('    ③ 累加后:tooBig=' + rec10r2.tooBig + ' · names=' + JSON.stringify(rec10r2.tooBigNames));
+check(rec10r2.tooBigNames.length === TOO_BIG_NAMES_MAX,
+  '多批累加后名字仍只留 ' + TOO_BIG_NAMES_MAX + ' 条(账本是摘要,不许被多批撑大)');
+
+// ── ④ 护栏:tooBig 0..10000;names 前 5 / ≤40 字 / 非字符串丢弃 ──────────────
+const g6 = cleanTooBigNames(['a', 'b', 'c', 'd', 'e', 'f']);
+const gLong = cleanTooBigNames(['x'.repeat(50)]);
+const gMix = cleanTooBigNames([1, {}, null, '', 'ok', ['arr']]);
+console.log('    ④ 6 条→' + JSON.stringify(g6) + ' · 50 字→' + gLong[0].length + ' 字 · 混类型→' + JSON.stringify(gMix)
+  + ' · tooBig(1e9)=' + cleanTooBig(1e9));
+check(g6.length === TOO_BIG_NAMES_MAX && TOO_BIG_NAMES_MAX === 5, '只取前 5 条');
+check(gLong[0].length === TOO_BIG_NAME_CHARS && TOO_BIG_NAME_CHARS === 40, '每条截到 40 字');
+check(gMix.join(',') === 'ok', '非字符串项丢弃');
+check(cleanTooBigNames('不是数组').length === 0, '非数组 → 空数组(不抛:账本通路只许少记)');
+check(cleanTooBig(1e9) === TOO_BIG_MAX && TOO_BIG_MAX === 10000, 'tooBig 夹到 10000');
+check(cleanTooBig(-3) === 0 && cleanTooBig('abc') === 0 && cleanTooBig(undefined) === 0, '负数/非数字/缺省 → 0');
+const mem10g = new MemoryStore(join(dir, 'm10g.db'));
+logImport(mem10g, { at: B10, tooBig: 1e9, tooBigNames: ['x'.repeat(99), 1, 'y'] });
+const rec10g = listImportLog(mem10g)[0];
+console.log('    ④ 直接调 logImport 也过护栏:tooBig=' + rec10g.tooBig + ' names=' + JSON.stringify(rec10g.tooBigNames));
+check(rec10g.tooBig === TOO_BIG_MAX && rec10g.tooBigNames.length === 2 && rec10g.tooBigNames[0].length === 40,
+  'logImport 自己也过护栏(端点不是唯一入口 —— 「三条入口共用」这份才是底线)');
+check(!rec10g.tooBigNames.some((x) => typeof x !== 'string'), '落账的每一项名字都是字符串');
+
+// ── ⑤ 命门(端点级):只报 tooBig ⇒ errors 不增长;只报 errors ⇒ 逐字照旧 ────
+process.env.DSH_LING_GUARD = 'off';
+const { registerApi } = await imp('lib/host/api.js');
+const { SettingsFile } = await imp('lib/host/settings-file.js');
+const routes10 = new Map();
+const server10 = { register: (r) => { routes10.set(r.path, r.handler); return () => routes10.delete(r.path); } };
+const gate10 = {
+  snapshotIds: () => [], snapshotOf: () => null, isRunning: () => false,
+  pendingCount: () => 0, recentSessionId: () => null, markSnapStale: () => {},
+};
+const memEp = new MemoryStore(join(dir, 'm10ep.db'));
+registerApi({ get: (n) => (n === 'webServer' ? server10 : undefined) },
+  { gate: gate10, memory: memEp, settings: new SettingsFile(join(dir, 'set10')) }, {});
+/** 打真路由 `/import/log`(与 bodylimit.test.mjs T6 同法:假 req/res + 真 handler)。 */
+const post10 = async (bodyObj) => {
+  const handler = routes10.get('/api/dsh-ling/import/log');
+  if (typeof handler !== 'function') throw new Error('路由没挂上:/import/log');
+  const out = { status: 0, body: null };
+  const req = new EventEmitter();
+  req.url = '/import/log'; req.method = 'POST'; req.headers = { host: '127.0.0.1:3080' };
+  req.destroy = () => {};
+  const res = {
+    statusCode: 0, writableEnded: false, destroyed: false,
+    setHeader() {},
+    end(p) { this.writableEnded = true; out.status = this.statusCode; try { out.body = JSON.parse(String(p ?? '')); } catch { out.body = null; } },
+  };
+  const done = handler(req, res);
+  req.emit('data', Buffer.from(JSON.stringify(bodyObj), 'utf8'));
+  req.emit('end');
+  await done;
+  return out;
+};
+const epAt = NOW - 5 * 60 * 1000;
+const rEp1 = await post10({ runId: 'ep-skip', at: epAt, file: 'big.json', tooBig: 2, tooBigNames: ['超大会话'] });
+const eEp1 = listImportLog(memEp).find((x) => x.runId === 'ep-skip');
+console.log('    ⑤ 只报 tooBig ⇒ 回执 ' + JSON.stringify(rEp1.body) + ' · 账本 errors=' + eEp1.errors
+  + ' tooBig=' + eEp1.tooBig + ' names=' + JSON.stringify(eEp1.tooBigNames));
+check(eEp1.tooBig === 2 && eEp1.errors === 0, '★命门:只报跳过 ⇒ tooBig=2,errors **不增长**(仍是 0)');
+await post10({ runId: 'ep-skip', at: epAt + 100, file: 'big.json', tooBig: 1, tooBigNames: ['第二条'] });
+const eEp2 = listImportLog(memEp).find((x) => x.runId === 'ep-skip');
+check(eEp2.tooBig === 3 && eEp2.errors === 0, '再报一次仍累加、errors 仍 0(实测 tooBig=' + eEp2.tooBig + ' errors=' + eEp2.errors + ')');
+await post10({ runId: 'ep-err', at: epAt + 200, file: 'big.json', errors: 1 });
+const eEp3 = listImportLog(memEp).find((x) => x.runId === 'ep-err');
+check(eEp3.errors === 1 && !eEp3.tooBig, '既有"只报 errors"通路逐字不变(errors=1 · 无 tooBig)');
+await post10({ runId: 'ep-none', at: epAt + 300, file: 'big.json' });
+const eEp4 = listImportLog(memEp).find((x) => x.runId === 'ep-none');
+check(eEp4.errors === 1, '旧默认:既不报 errors 也不报 tooBig ⇒ 仍记 1 批失败(与修前逐字一致)');
+await post10({ runId: 'ep-guard', at: epAt + 400, tooBig: 1e9, tooBigNames: ['z'.repeat(80), 7, 'w'] });
+const eEp5 = listImportLog(memEp).find((x) => x.runId === 'ep-guard');
+console.log('    ⑤ 端点护栏:tooBig=' + eEp5.tooBig + ' · names=' + JSON.stringify(eEp5.tooBigNames));
+check(eEp5.tooBig === TOO_BIG_MAX && eEp5.tooBigNames.length === 2 && eEp5.tooBigNames[0].length === 40,
+  '端点上也过护栏(10000 / 40 字 / 丢非字符串 —— 原始 HTTP 输入绕不过去)');
+delete process.env.DSH_LING_GUARD;
+
 console.log(ok ? '导入记录 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

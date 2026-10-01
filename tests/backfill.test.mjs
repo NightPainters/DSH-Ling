@@ -148,13 +148,20 @@ mkdirSync(join(fakeHomeB, '.dsh', 'sessions', 'ws-a', 'sid-1'), { recursive: tru
 put(join(fakeHomeB, '.dsh', 'sessions', 'ws-a', 'sid-1'), 'session.v5.jsonl.zst', 'x');
 const realProfile = process.env.USERPROFILE;
 const realHomeEnv = process.env.HOME;
+// 修复一(2026-09-29)追加:defaultSessionsRoot() 改为跟随 dshHome()(= DSH_HOME 优先,
+// 否则 homedir()),所以「假 home」隔离必须**连 DSH_HOME 一起清掉** —— 否则本机设了
+// DSH_HOME 时(实测开发机就是如此:进程级设着 `DSH_HOME=<某绝对路径>`)下面的假 home 会被忽略,
+// 这三条既有用例会被带去读真机会话目录。断言一个字没动,动的只是隔离前提。
+const realDshHomeEnv = process.env.DSH_HOME;
 /** 在假 home 里跑一段:期间 homedir() 指向它,结束必还原(失败也不污染后续用例)。 */
 async function inFakeHome(home, fn) {
   process.env.USERPROFILE = home;
   process.env.HOME = home;
+  delete process.env.DSH_HOME; // DSH_HOME 优先于 homedir();不清它,假 home 就不是"唯一来源"
   try { return await fn(); } finally {
     if (realProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = realProfile;
     if (realHomeEnv === undefined) delete process.env.HOME; else process.env.HOME = realHomeEnv;
+    if (realDshHomeEnv === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = realDshHomeEnv;
   }
 }
 // 前提自检:homedir() 必须真的被环境变量带走,否则这套隔离不成立(此时跳过而不是假装通过)
@@ -188,4 +195,55 @@ test('BUG-2(不传 root):根目录存在但没有合格文件名 → no-session-
   assert.match(report.note, /未找到会话文件/);
   assert.match(report.note, /session\.v5\.jsonl\.zst/, '原因里要带上实际见到的文件名');
   assert.ok(!/undefined/.test(report.note), 'note 里不许出现 undefined:' + report.note);
+});
+
+// ── 修复一(2026-09-29):defaultSessionsRoot() 不认 DSH_HOME ────────────────────────
+// 事实:本文件旧实现 `join(homedir(), '.dsh', 'sessions')` 与 deepsummary.js:111
+// `findSessionFile()` 的 `join(dshHome(), 'sessions')` 是**同一语义两个来源**。
+// 没设 DSH_HOME 时两者等价(所以平时看不出来);一旦设了(例如导入测试台),两者分叉:
+// 「本机 DSH 扫描」会去读**真机**会话目录 —— 不报错、只读,但结果不可复现,还会把真历史灌进测试库。
+// 以下三条:①设了 DSH_HOME 必须跟随它(改前必红);②必须与 dshHome() 同源;③不传 root 的整条路径以 DSH_HOME 为准。
+const { dshHome } = await imp('lib/host/util.js');
+/** 在临时 DSH_HOME 里跑一段;结束必还原(含「原本就没设」的情形 ⇒ 不污染同进程后续用例)。 */
+async function inDshHome(dir, fn) {
+  const prev = process.env.DSH_HOME;
+  if (dir === null) delete process.env.DSH_HOME; else process.env.DSH_HOME = dir;
+  try { return await fn(); } finally {
+    if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev;
+  }
+}
+const dshHomeNow = () => (process.env.DSH_HOME === undefined ? undefined : process.env.DSH_HOME);
+
+test('修复一:设了 DSH_HOME ⇒ defaultSessionsRoot() 必须跟随它,不再只看 homedir()', async () => {
+  const h = join(tmp, 'dsh-home-explicit');
+  const got = await inDshHome(h, () => defaultSessionsRoot());
+  assert.equal(got, join(h, 'sessions'), 'DSH_HOME 优先');
+  assert.notEqual(got, join(homedir(), '.dsh', 'sessions'), '设了 DSH_HOME 就绝不能再去 homedir()/.dsh(缺陷本体)');
+  assert.equal(dshHomeNow(), realDshHomeEnv === undefined ? undefined : realDshHomeEnv, '跑完必须还原 DSH_HOME,不污染同进程后续用例');
+});
+
+test('修复一:与 deepsummary/数据目录**同源** —— defaultSessionsRoot() === join(dshHome(), "sessions")', async () => {
+  const a = join(tmp, 'dsh-home-src-a');
+  const b = join(tmp, 'dsh-home-src-b');
+  assert.equal(await inDshHome(a, () => defaultSessionsRoot()), join(await inDshHome(a, () => dshHome()), 'sessions'), 'DSH_HOME=A 时同源');
+  assert.equal(await inDshHome(b, () => defaultSessionsRoot()), join(await inDshHome(b, () => dshHome()), 'sessions'), 'DSH_HOME=B 时同源');
+  assert.equal(await inDshHome(null, () => defaultSessionsRoot()), join(await inDshHome(null, () => dshHome()), 'sessions'), 'DSH_HOME 未设时同源(退化到 ~/.dsh)');
+  assert.equal(dshHomeNow(), realDshHomeEnv === undefined ? undefined : realDshHomeEnv, '跑完必须还原 DSH_HOME');
+});
+
+test('修复一(不传 root):DSH_HOME 与假 home 同时在场 ⇒ 扫描以 DSH_HOME 为准', { skip: skipIfNotHonored }, async () => {
+  const h = join(tmp, 'dsh-home-wins');
+  mkdirSync(join(h, 'sessions', 'ws-a', 'sid-1'), { recursive: true });
+  put(join(h, 'sessions', 'ws-a', 'sid-1'), 'session.v4.jsonl.zstd', 'not-really-zstd-but-counted');
+  const loseHome = join(tmp, 'home-loses');
+  // ⚠️ 嵌套顺序有讲究:inFakeHome 会**清掉** DSH_HOME(它是"假 home 当唯一来源"的隔离),
+  // 所以必须先立假 home、再在内层设 DSH_HOME,才能验"两个来源同时在场时谁说了算"。
+  const { report } = await inFakeHome(loseHome, () => inDshHome(h, () => scanDshHistory({})));
+  // ⚠️ `report.root` 只在**0 候选**的归因路径上出现(scanDshHistory 用 emptyScanInfo 才写它),
+  // 扫到候选时它本就是 undefined —— 所以这里改用"扫到了几条 / 有没有归因"来判来源:
+  // DSH_HOME 下我们放了 1 个候选,假 home 下一个都没有(连目录都不存在)。
+  assert.equal(report.scanned, 1, 'DSH_HOME 下的那一个候选必须被扫到(改前:扫的是假 home ⇒ 0 候选)');
+  assert.equal(report.failed + report.skippedWeak, 1, '那 1 个是我们伪造的非 zstd 文件(解不开/没正文):scanned=1 说明它确实来自 DSH_HOME');
+  assert.equal(report.reason, undefined, '扫到候选就不该走 0 候选归因(改前会判 no-sessions-root)');
+  assert.equal(dshHomeNow(), realDshHomeEnv === undefined ? undefined : realDshHomeEnv, '跑完必须还原 DSH_HOME');
 });

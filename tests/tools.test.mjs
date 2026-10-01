@@ -381,7 +381,7 @@ check(!memReal.listBranches().some((b) => ['回归验证枝A', '回归验证枝B
 
 // ---- 关①.6 合规判据表(2026-09-26 加):tools/compliance-spec.mjs 的纯函数行为 + README 声明面现状
 // ⚠ fixture 里的禁用措辞与出站模式必须**拼出来**:tests/ 也在关①.6 的扫描范围内,写成连续
-//   字面量会让"禁用措辞 0 命中""出站基线 4 处"这两条判据命中本文件自己(判据表用的是同一招)。
+//   字面量会让"禁用措辞 0 命中""出站基线 6 处"这两条判据命中本文件自己(判据表用的是同一招)。
 // ⚠ 这里**不**引用 release\ 下的手册:那不在 npm 包里,包里跑测试会 ENOENT;手册纪律由关①.6 运行器核。
 const { FORBIDDEN, REQUIRED, OUTBOUND, scanText } = await imp('tools/compliance-spec.mjs');
 check(FORBIDDEN.length === 3 && REQUIRED.length >= 15,
@@ -410,7 +410,9 @@ check(obOk.outbound.length === 1 && !obOk.problems.some((p) => p.id === 'F-OUTBO
 const obBad = scanText('lib/client.js', 'function evil(){ return ' + FETCH + "'https://example.com/x'); }");
 check(obBad.problems.some((p) => p.id === 'F-OUTBOUND-NOT-WHITELISTED'),
   '出站:白名单外的调用被报出来(按归属函数判定,不按行号)');
-check(OUTBOUND.baseline === 4 && OUTBOUND.re.test(FETCH), `出站:基线 ${OUTBOUND.baseline} 处,模式对 ${FETCH} 有效`);
+// 基线 2026-10-01 从 4 提到 6:新增的两处都是 lib/client.js 里**同源**的手术门票据端点
+// (常量 API = '/api/dsh-ling',相对路径)与其重发分支;定性依据写在 tools/compliance-spec.mjs 的 OUTBOUND 注释里。
+check(OUTBOUND.baseline === 6 && OUTBOUND.re.test(FETCH), `出站:基线 ${OUTBOUND.baseline} 处,模式对 ${FETCH} 有效`);
 
 // 真实现状:README 的声明面(另一路 2026-09-26 已补齐 M1/M2/M3/M4;缺了会在这里点名)
 const { readFileSync: rf } = await import('node:fs');
