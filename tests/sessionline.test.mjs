@@ -112,7 +112,15 @@ const runTurn = async ({ h, live, memory, turn, messages = [userMsg()], base = 1
   check(fat.length <= LINE_MAX_CHARS, '整行 ≤110 字(实长 ' + fat.length + ')');
   check(buildSessionLineText({ title: '', progress: '', turn: 1, ordinal: 1 }) === '', '标题与进展皆空 ⇒ 空(绝不写空文本)');
   // turn 缺失 ⇒ 省略轮次段(绝不写"第 0 轮"这种假读数)
-  const noTurn = buildSessionLineText({ title: TITLE, progress: progressLine(USER_TEXT), ordinal: 2, at: NOW });
+  // ⚠️ 末段的 HH:MM 是 `at` 的**本机时区**渲染(`lib/host/session-line.js:87` 用的是
+  //    getHours/getMinutes,即本机时区,不是 UTC),所以这里不能拿"固定的 UTC 毫秒"当 `at`:
+  //    NOW = 1800000000000 = 2027-01-15T08:00:00Z,在开发机(Asia/Shanghai)渲染成 16:00、
+  //    在 CI 的 ubuntu 跑器(UTC)渲染成 08:00 ⇒ 写死 ` · 16:00` 等于把开发机时区当成常量
+  //    (2026-10-01 SEG 30 红的就是这一条)。改用与本节第一行 `new Date(2026, 0, 2, 9, 30)`
+  //    同一手法:由**本机本地时间分量**构造 `at`,于是 ` · 16:00` 在任何时区都成立,
+  //    且仍是逐字比对(不放宽成"含某个 HH:MM"就算过)。
+  const AT_LOCAL_1600 = new Date(2026, 0, 2, 16, 0).getTime();
+  const noTurn = buildSessionLineText({ title: TITLE, progress: progressLine(USER_TEXT), ordinal: 2, at: AT_LOCAL_1600 });
   check(!noTurn.includes('轮'), 'turn 缺失 ⇒ 不含轮次段: ' + noTurn);
   check(!noTurn.includes('第 0 轮'), 'turn 缺失 ⇒ 绝不出现「第 0 轮」');
   check(noTurn.includes(TITLE) && noTurn.includes(' · 16:00'), 'turn 缺失 ⇒ 仍有标题 + HH:MM');

@@ -16,7 +16,7 @@
 //
 // 纪律:全程 `mkdtempSync` 临时库 + 临时归档目录 —— 绝不碰 live 库
 // (真机的记忆库是 WAL,复制即丢数据;本套测试连真机路径都不读)。
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -85,7 +85,15 @@ const l1Ids = () => selectL1(mem, L1).items.map((i) => i.conv_id);
 const a1 = archiveBefore(mem, { source: 'dsh', convId: SID, kind: 'forget', reason: '测试:归档忠实度', actor: 'ling' });
 check(a1.ok === true && a1.turns === 5, '归档成功且如实回报轮数:' + JSON.stringify({ ok: a1.ok, turns: a1.turns }));
 check(readFileSync(join(a1.dir, 'turns.jsonl'), 'utf8').trim().split('\n').length === 5, 'turns.jsonl 逐行 5 条');
-const a1read = readArchive(mem, a1.dir.slice(a1.dir.lastIndexOf('\\') + 1));
+// ⚠️ 取「归档目录名」只能用 basename()。本文件原来四处都写成
+//    `dir.slice(dir.lastIndexOf('\\') + 1)` —— 那是**把 Windows 的分隔符当常量**:
+//      · Windows:`\` 就是分隔符 ⇒ 恰好切出目录名(所以本机一直绿);
+//      · POSIX:`lastIndexOf('\\')` 恒为 -1 ⇒ `slice(0)` 把**整个绝对路径**当名字交出去,
+//        而 readArchive() 会把非 [A-Za-z0-9_-] 的字符全剥掉(lib/host/archive.js:177)
+//        ⇒ 名字对不上、turns 恒为 [] ⇒ 下一条断言假红,再下一行 `turns[3].model` 直接
+//        TypeError(Cannot read properties of undefined)。CI 上 SEG 16 的两行报错正是这么来的。
+//    basename() 两平台同义,且**断言强度不变**(仍是"逐字相同的目录名")。
+const a1read = readArchive(mem, basename(a1.dir));
 check(a1read.ok && a1read.turns.length === 5 && a1read.turns[2].text === TURNS[2].text, '读回的第 3 轮原文逐字相同');
 check(a1read.turns[3].model === 'deepseek' && a1read.turns[0].ts === '2026-09-25T01:00:00.000Z', 'model/ts 字段没有在往返里丢失');
 check(a1read.overview && a1read.overview.title === '归档纪律(主人定名)' && a1read.overview.title_locked === true,
@@ -109,7 +117,7 @@ check(a1b.ok && a1b.dir !== a1.dir, '同一秒第二次归档拿到**不同**目
 //   ⇒ 误报"上一份被静默覆盖"(而盘上其实老老实实躺着两份)。
 //   实测:两次调用间隔约 8ms(2026-09-26 17:57 那次是 92.0ms → 100.0ms),所以约 0.8% 的跑法
 //   会跨秒;机器一忙窗口更大。**判据只能看名字本身,不能看时间的形状。**
-const a1bName = a1b.dir.slice(a1b.dir.lastIndexOf('\\') + 1);
+const a1bName = basename(a1b.dir); // 同上:分隔符不是常量
 const arcNames = listArchives(mem).map((x) => x.name);
 check(arcNames.includes(a1read.name) && arcNames.includes(a1bName) && a1read.name !== a1bName,
   '两份归档**同时**在盘上且是两个条目(唯一化一坏,第二次就落进同一个目录,清单里只剩 1 条):'
@@ -159,7 +167,7 @@ check(listArchives(mem).some((x) => x.dir === arc.dir), '归档文件留在原�
 const lockedBefore = ovRow('dsh', SID);
 const rawHashBefore = sha(rawRows(SID));
 const good = archiveBefore(mem, { source: 'dsh', convId: SID, kind: 'forget', reason: '往返测试', actor: 'ling' });
-const name = good.dir.slice(good.dir.lastIndexOf('\\') + 1);
+const name = basename(good.dir); // 同上:分隔符不是常量
 const exported = dumpOut(mem.exportEntry('dsh', SID));         // 归档 → 落盘中转站
 const reads = readArchive(mem, name);
 check(reads.turns.length === 5, '回灌源:从归档读回 5 轮');
@@ -210,7 +218,7 @@ check(mem.restoreEntry({ source: '', convId: '' }).reason === 'bad-key', '空键
 const ghostArc = archiveBefore(mem, { source: 'dsh', convId: 'sess-ghost-does-not-exist', kind: 'forget', reason: '测试:空归档', actor: 'ling' });
 check(ghostArc.ok === true && ghostArc.turns === 0, '空目标归档仍"落盘成功"(目录与 README 都在)');
 check(ghostArc.empty === true, '★ 但它被明确标成 empty —— 调用方据此拒绝对"还不存在的记忆"打标记(B-05 的判据)');
-check(listArchives(mem).some((x) => x.name === ghostArc.dir.slice(ghostArc.dir.lastIndexOf('\\') + 1)), '空归档也出现在清单里(可被 inspect 看见)');
+check(listArchives(mem).some((x) => x.name === basename(ghostArc.dir)), '空归档也出现在清单里(可被 inspect 看见)');
 const realArc = archiveBefore(mem, { source: 'dsh', convId: SID, kind: 'forget', reason: 'x', actor: 'ling' });
 check(realArc.empty === false && realArc.turns > 0, '真有内容的归档不会被误判成 empty');
 // 判据强度:不是"因为条目不在库才空",而是"归档里确实什么都没保住"

@@ -514,9 +514,27 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
   const def = previewDbPolicy(undefined, {}, env);
   check(def.ok === true && def.db === 'C:/db/lib.db',
     '★B 负对照:不给 ?db= ⇒ 照旧用默认库(实测 ' + JSON.stringify(def) + ')');
-  const same = previewDbPolicy('c:\\DB\\lib.db', {}, env);
-  check(same.ok === true && same.db === 'c:\\DB\\lib.db',
-    '★B 负对照:默认库的同一路径(反斜杠/盘符大小写不同)照旧放行(实测 ' + JSON.stringify(same) + ')');
+  // ⚠️ "同一路径的不同写法"是**平台语义**,不是普遍真理。判据在 normDbPath()
+  //    (`lib/host/api.js:130-133`):① `\`→`/` + 去尾斜杠(**两平台都做**);② 折大小写**只在 win32**。
+  //    · Windows:盘符与路径都不区分大小写、`\` 与 `/` 等价 ⇒ `c:\DB\lib.db` 与白名单里的
+  //      `C:/db/lib.db` 指的是**同一个文件** ⇒ 必须放行(否则主人换个写法填就被自家白名单拒了)。
+  //    · POSIX:大小写**敏感**(`c:` ≠ `C:`、`DB` ≠ `db`),`\` 还只是普通文件名字符 ⇒ 归一后
+  //      `c:/DB/lib.db` 与 `C:/db/lib.db` **仍是两个不同路径** ⇒ 必须拒。这里放行才是错的:
+  //      端点拿到 pol.db 后走的是 `openSource(pol.db)`(api.js:2795/2807)—— 打开的是**原样字符串**,
+  //      归一化只是比对用的键;放行一个白名单没写过的路径,等于白名单被绕过。
+  //    两支都断言实值:win32 支钉"等价写法放行 + db 原样回给调用方";POSIX 支钉"不等价 ⇒ 拒且不静默"
+  //    (reason/asked/allowed 都在 ⇒ 证明确实是"写法不同"被拒,不是白名单为空)。
+  if (process.platform === 'win32') {
+    const same = previewDbPolicy('c:\\DB\\lib.db', {}, env);
+    check(same.ok === true && same.db === 'c:\\DB\\lib.db',
+      '★B 负对照:默认库的同一路径(反斜杠/盘符大小写不同)照旧放行(实测 ' + JSON.stringify(same) + ')');
+  } else {
+    const diff = previewDbPolicy('c:\\DB\\lib.db', {}, env);
+    check(diff.ok === false && diff.reason === 'db-not-allowed' && diff.db === ''
+      && diff.asked === 'c:\\DB\\lib.db' && diff.allowed.join() === 'C:/db/lib.db',
+      '★B 负对照(POSIX):`c:\\DB\\lib.db` 与默认库 `C:/db/lib.db` 是两个不同路径(大小写敏感)'
+      + '⇒ 拒且不静默:reason/asked/allowed 都在、db 为空(实测 ' + JSON.stringify(diff) + ')');
+  }
   const cfg = { get: () => ({ dsweb: { dbPath: 'D:/mine/a.db' } }) };
   check(previewDbPolicy('D:/mine/a.db', cfg, {}).ok === true, '★B 负对照:settings 白名单内的路径放行');
   check(previewDbPolicy('D:/mine/b.db', { get: () => ({ dsweb: { dbs: ['D:/mine/b.db'] } }) }, {}).ok === true,
