@@ -192,7 +192,7 @@ check(rawCols.some((c) => c.name === 'source' && String(c.type).toUpperCase() ==
   'E3:source 列就位(TEXT,可空),实际=' + JSON.stringify(rawCols.map((c) => `${c.name}:${c.type}:notnull=${c.notnull}`)));
 check(rawCols.length === 7 && rawCols[6].name === 'source' && rawCols[0].pk === 1 && rawCols[1].pk === 2,
   'E3:列尾追加 + 主键仍是 (session_id,seq),实际末列=' + rawCols[rawCols.length - 1].name);
-check(String(e2a.kvGet('schema_version')) === '14', 'E3:schema_version=14(实际 ' + e2a.kvGet('schema_version') + ')');
+check(String(e2a.kvGet('schema_version')) === '17', 'E3:schema_version=17(实际 ' + e2a.kvGet('schema_version') + ')');
 check(e2a.kvGet('dbg.raw_source_col') === undefined,
   'E3:迁移**成功路径零 kv 写入**(诊断键只在迁移失败时出现 —— 干净库的 kv 键集合因此不变,实际='
   + String(e2a.kvGet('dbg.raw_source_col')) + ')');
@@ -374,8 +374,8 @@ const tryConstruct = (p) => {
   // 锁释放后重开:**自愈**(探列幂等 ⇒ 迁移补上、诊断键清掉、schema_version 前进)
   const heal = new MemoryStore(p);
   const healCols = heal.db.prepare('PRAGMA table_info(dsh_turns_raw)').all().map((c) => c.name);
-  check(healCols.includes('source') && String(heal.kvGet('schema_version')) === '14' && heal.kvGet('dbg.raw_source_col') === undefined,
-    'E4②:锁释放后重开自愈(source 列补上、schema_version=14、诊断键不残留),实际 ' + JSON.stringify([healCols, heal.kvGet('schema_version'), heal.kvGet('dbg.raw_source_col')]));
+  check(healCols.includes('source') && String(heal.kvGet('schema_version')) === '17' && heal.kvGet('dbg.raw_source_col') === undefined,
+    'E4②:锁释放后重开自愈(source 列补上、schema_version=17、诊断键不残留),实际 ' + JSON.stringify([healCols, heal.kvGet('schema_version'), heal.kvGet('dbg.raw_source_col')]));
   check(String(heal.db.prepare("SELECT text FROM dsh_turns_raw WHERE session_id='keep-me'").get()?.text) === '老库里的原文',
     'E4②:迁移没动任何既有行的字节(原文仍在)');
   heal.close();
@@ -390,7 +390,7 @@ const tryConstruct = (p) => {
   if (r.m) {
     const cols = r.m.db.prepare('PRAGMA table_info(dsh_turns_raw)').all().map((c) => c.name);
     check(cols.length === 7 && cols[6] === 'source', 'E4③:迁移成功 —— source 补在列尾(实际 ' + JSON.stringify(cols) + ')');
-    check(String(r.m.kvGet('schema_version')) === '14', 'E4③:schema_version 前进到 14(实际 ' + r.m.kvGet('schema_version') + ')');
+    check(String(r.m.kvGet('schema_version')) === '17', 'E4③:schema_version 前进到 17(实际 ' + r.m.kvGet('schema_version') + ')');
     check(r.m.kvGet('dbg.raw_source_col') === undefined, 'E4③:迁移**成功路径零 kv 写入** —— dbg 键不写(实际 ' + String(r.m.kvGet('dbg.raw_source_col')) + ')');
     check(Number(r.m.db.prepare("SELECT COUNT(*) n FROM dsh_turns_raw WHERE source IS NULL").get().n) === 1,
       'E4③:纯增列不动既有行(老行 source 仍 NULL)⇒ 读侧判据逐字同解');

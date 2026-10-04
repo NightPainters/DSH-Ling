@@ -16,7 +16,7 @@ const {
   RULE_ADD_SPEC, HABIT_PROPOSE_SPEC, HABIT_RESOLVE_SPEC,
   TREE_READ_SPEC, BRANCH_EDIT_SPEC, MEMORY_FORGET_SPEC, MEMORY_BACKFILL_SPEC,
   TOOL_RULE_ADD, TOOL_HABIT_PROPOSE, TOOL_HABIT_RESOLVE, TOOL_TREE_READ, TOOL_BRANCH_EDIT,
-  TOOL_MEMORY_FORGET, TOOL_MEMORY_BACKFILL,
+  TOOL_MEMORY_FORGET, TOOL_MEMORY_BACKFILL, TOOL_RECALL,
 } = await imp('lib/host/tools.js');
 
 const dir = mkdtempSync(join(tmpdir(), 'ling-tools-'));
@@ -80,10 +80,11 @@ check(/比遗忘更危险/.test(MEMORY_BACKFILL_SPEC.description), 'backfill:描
 const registered = [];
 const fakeCtx = { tools: { register: (spec) => { registered.push(spec); return () => {}; } } };
 const r1 = registerLingTools(fakeCtx, { gate: { snapshotIds: () => [] }, memory: { kvSet: () => {} }, settings });
-check(r1.ok === true && registered.length === 7, '注册成功:七个工具(G1 加树工具,G2 加遗忘/回灌)');
+check(r1.ok === true && registered.length === 8, '注册成功:八个工具(G1 加树工具,G2 加遗忘/回灌,1.6-P2 加直通原文)');
 check(registered.map((s) => s.name).sort().join(',')
-  === 'branch_edit,habit_propose,habit_resolve,memory_backfill,memory_forget,rule_add,tree_read',
-  '注册的是这七个名字');
+  === 'branch_edit,habit_propose,habit_resolve,memory_backfill,memory_forget,recall,rule_add,tree_read',
+  '注册的是这八个名字');
+check(registered.some((s) => s.name === TOOL_RECALL), 'recall(直通原文,1.6-P2)已注册');
 const r2 = registerLingTools({ get: () => null }, { gate: null, memory: null, settings });
 check(r2.ok === false && r2.reason === 'no-tools', '无 tools 服务 → 优雅降级(不抛错)');
 
@@ -356,17 +357,23 @@ check(!memReal.listForgotten({ limit: 50 }).some((f) => f.convId === 't-shell-1'
 const fShellText = forgetTool.output.render({}, fShell)[0].text;
 check(/没有任何内容/.test(fShellText) && !/未执行\(/.test(fShellText),
   'B-05:回执说清是"归档空了",不是含混的「未执行(empty-archive)」—— 实际:' + JSON.stringify(fShellText.slice(0, 60)));
-// B-05 的**第二条路**(本轮补):概述有正文、只是原文 0 轮 —— 这种归档 `arc.empty === false`
-// (概述确实保住了),拦下它的是 `memory.forgetEntry` 的**验盘**闸门。此时回执若照抄第一路的
-// "概述也没有正文"就是**撒谎**:那段正文就在 overview.json 里。两条路必须分开说。
+// ⚠️ **2026-10-04 改判**(红队 3 的 P1 实测 + 归档器判据修正):
+//   本条原期望「概述在、原文 0 轮 ⇒ 仍拒绝打标记」。但那份归档里**装着这段概述正文**
+//   (overview.json 的 145 字摘要)—— 内容保住了、可回灌 ⇒ 遗忘是安全的。
+//   旧行为的实害恰恰相反:这类条目("只有概述"的主脉记忆 / import 条目,**真库实测 3 条**)
+//   **永远忘不掉**,而回执还把一份躺着摘要的归档念成「归档里什么都没有」(说错话)。
+//   B-05 的真正实害是「**空**归档换来一条永久标记」—— 那条由第一路(0 轮 + 概述无正文 +
+//   元数据空壳)继续挡着,这里放行不碰它。判据收在 `archive.js` 的 `empty`(空壳 `raw_seq` 不算内容)。
 memReal.upsertOverview({ source: 'dsh', conv_id: 't-sum-only', title: '只有概述正文的条目', summary: '一段真实存在的概述正文' });
 const fSum = await forgetTool.execute({ action: 'forget', source: 'dsh', convId: 't-sum-only', reason: 'B-05 第二路:概述在原文空' }, {});
 const fSumText = forgetTool.output.render({}, fSum)[0].text;
-check(fSum.ok === false && fSum.reason === 'empty-archive' && Number(fSum.turns) === 0,
-  'B-05 第二路:概述在、原文 0 轮 → 仍拒绝打标记(验盘闸门)');
-check(!memReal.listForgotten({ limit: 50 }).some((f) => f.convId === 't-sum-only'), 'B-05 第二路:不落 forgotten 行');
-check(/没有原文/.test(fSumText) && !/概述也没有正文/.test(fSumText),
-  'B-05 第二路:回执不许说"概述也没有正文"(它在 overview.json 里)—— 实际:' + JSON.stringify(fSumText.slice(0, 70)));
+check(fSum.ok === true,
+  '★ B-05 第二路:概述在、原文 0 轮 → **放行**(归档里确实保住了那段正文,忘得掉也回得来):'
+  + JSON.stringify({ ok: fSum.ok, reason: fSum.reason, turns: fSum.turns }));
+check(memReal.listForgotten({ limit: 50 }).some((f) => f.convId === 't-sum-only'),
+  '★ B-05 第二路:放行后**落** forgotten 行(它现在是一条正常被忘掉的记忆)');
+check(!/没有任何内容/.test(fSumText) && !/概述也没有正文/.test(fSumText),
+  '★ B-05 第二路:回执不许说"归档里什么都没有"(那段正文就在 overview.json 里)—— 实际:' + JSON.stringify(fSumText.slice(0, 70)));
 
 // 收尾:拆掉回归用的枝,不给库留垃圾
 await editTool.execute({ action: 'unlink', id: mkA.id, to: mkB.id, reason: '回归验证收尾' }, {});
