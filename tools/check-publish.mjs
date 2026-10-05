@@ -56,6 +56,21 @@ const HARD_CONTENT_PATTERNS = [
 ];
 const MAX_BYTES = 5 * 1024 * 1024; // 单文件超过 5MB 值得人工确认
 
+// 3) 对外文档:内部流程术语(**警告级**,不阻断发布)。2026-10-05 补(尝生拍板):
+//    发布关此前只拦"别泄密 / 别黑屏"两类事,**没有任何一条管对外文案** —— 于是 1.6.1 的
+//    CHANGELOG 里写满了「3×3 红蓝对抗审计 / 红队 3 路 + 蓝队 3 路 / 6 个独立审计员 / 总账」,
+//    末尾还附了 6 份内部文档路径;对外读者零信息量。那一版是**人眼**看出来的,脚本没拦住。
+//    口径:**只警告、不阻断** —— 「主人」「器灵」「子代理」这类词在设定语境里**是该出现的**
+//    (README 的「设定全文(对外面)」整节就在讲这个),硬拦必然误报,人会被训练成无视它。
+//    只在**对外文档**上判:仓库里的内部笔记/审计报告不受影响(它们本来就该写全套术语)。
+const EXTERNAL_DOCS = /^(README|CHANGELOG|DESIGN|ACCESS-DESIGN)\.md$|^package\.json$/;
+const JARGON_PATTERNS = [
+  [/红蓝对抗|红队|蓝队/, '内部审计流程术语(对外读者无信息量 ⇒ 换成「发布前检查」或直接删)'],
+  [/\d\s*[×xX]\s*\d\s*(?:路|的)?\s*(?:对抗|红蓝|审计)/, '内部审计流程术语(同上)'],
+  [/独立审计员|审计员/, '内部角色称呼(同上)'],
+  [/审计出处/, '内部文档索引(内网路径,对外无意义)'],
+];
+
 const problems = [];
 const warnings = [];
 let files = 0;
@@ -93,6 +108,13 @@ function walk(dir) {
     for (const [re, why] of HARD_CONTENT_PATTERNS) {
       const m = text.match(re);
       if (m) problems.push(`${rel} —— ${why}:${String(m[0]).slice(0, 40)}`);
+    }
+    // 对外文案的术语检查(警告级,不阻断 —— 口径见上方 JARGON_PATTERNS 的注释)
+    if (EXTERNAL_DOCS.test(name)) {
+      for (const [re, why] of JARGON_PATTERNS) {
+        const m = text.match(re);
+        if (m) warnings.push(`${rel} —— 对外文案含${why}:「${String(m[0]).slice(0, 30)}」`);
+      }
     }
   }
 }
