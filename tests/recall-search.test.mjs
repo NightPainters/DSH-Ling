@@ -10,7 +10,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
 const {
   clampSearchLimit, visibleIdSet, toSearchRows, renderSearch, searchDeepItems, adoptDeepItems,
-  SEARCH_HITS_DEFAULT, SEARCH_HITS_MAX, SEARCH_DEEP_MAX,
+  searchLocalTurns, SEARCH_LOCAL_TURNS_MAX,
+  SEARCH_HITS_DEFAULT, SEARCH_HITS_MAX, SEARCH_DEEP_MAX, withTimeout, SEARCH_TIMEOUT_MS,
 } = await imp('lib/host/recall-search.js');
 const { checkRecall } = await imp('lib/host/tools.js');
 
@@ -158,7 +159,11 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   }).includes('会话原文层'), '条目会话双命中时两段都在');
   check(renderSearch({
     ok: true, q: 'x', all: false, deep: [], rows: [{ conv: 'c2', seq: 1, time: 't', who: '尝生', snippet: 's' }],
-  }).includes('找到 1 个会话'), '无条目时保持旧口径(不破坏既有回执)');
+  }).includes('找到 1 轮原文'), '无条目时也要有明确说法(口径:现在是"轮原文"而不是"个会话" —— 本地层按轮给)');
+  check(renderSearch({
+    ok: true, q: 'x', all: false, local: true, deep: [],
+    rows: [{ conv: 'c2', seq: 1, time: 't', who: '尝生', snippet: 's' }],
+  }).includes('本机库内原文层'), '★ A方案:本地路回执必须标注来源(残的那份要说清,否则会被读成"库里只有这些")');
   check(renderSearch({ ok: true, q: 'x', all: false, deep: [], rows: [], skipped: 0 }).includes('没找到'), '都没命中时仍要明确说法');
   check(SEARCH_DEEP_MAX > 0 && SEARCH_DEEP_MAX <= 50, 'SEARCH_DEEP_MAX 在合理区间');
 }
@@ -201,6 +206,109 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   check(adoptDeepItems(mem, 'conv-a', 0, 0) === 0, '区间非法(0)⇒ 0');
   check(adoptDeepItems(mem, '', 10, 10) === 0, 'conv 为空 ⇒ 0');
   check(adoptDeepItems(mem, 'conv-a', 'abc', 10) === 0, '非数区间 ⇒ 0');
+  db.close();
+}
+
+// 8) 1.6.2:超时(把"不可中断"从根上消掉)+ 本会话排最后 + 超时回执
+//
+// 为什么这一节必须有断言:宿主的懒对账一旦卡住,`searchSessions` **不会返回**,而 GUI 没有中断入口
+// (实测挂过约 30 分钟)。这里的判据**坏了不会有人喊** —— 工具只会静静地又挂一次,而那是
+// "控制权被拿走"一级的问题。所以三条各自钉死:超时值、超时形态、超时时**条目照样交出去**。
+{
+  check(SEARCH_TIMEOUT_MS === 20000, '★ 超时上限是主人拍的 20 秒(改它要连注释与 README 一起改)');
+  check(SEARCH_HITS_DEFAULT === 5, '★ 原文层默认 5 条(1.6.2 由 10 收窄:别让它淹掉条目层)');
+
+  // 8a) 正常完成 ⇒ 原值透传
+  const fast = await withTimeout(Promise.resolve('v'), 200, 'x');
+  check(fast.ok === true && fast.value === 'v', 'withTimeout:正常完成 ⇒ 原值透传');
+
+  // 8b) 超时 ⇒ 结构化结果,**不抛**
+  const slow = await withTimeout(new Promise((r) => setTimeout(() => r('late'), 500)), 30, 'searchSessions');
+  check(slow.ok === false && slow.reason === 'timeout' && slow.ms === 30,
+    '★ withTimeout:超时 ⇒ {ok:false, reason:timeout}(同步 reject 或抛异常都会让模型那一步直接失败)');
+  check(slow.label === 'searchSessions', '超时要带上是哪一路超的(排查时第一眼要看的就是这个)');
+
+  // 8c) 底层后来完成了 ⇒ 结果被丢弃,但**不影响正确性**(检索是只读的)
+  let landed = false;
+  const got = await withTimeout(new Promise((r) => setTimeout(() => { landed = true; r('v'); }, 40)), 10, 'x');
+  check(got.ok === false, 'withTimeout:到点就下结论(不等底层)');
+  await new Promise((r) => setTimeout(r, 60));
+  check(landed === true, '底层操作之后照旧跑完(只读 ⇒ 丢弃无害;别在这上面加"取消"的想象)');
+
+  // 8d) 本会话排到最后 + 标 isSelf(不删)
+  const hits = [
+    { header: { id: 'me' }, bestMatch: { seq: 9, time: '2026-10-05 08:00:00', type: 'user/message', snippet: '刚说的话' } },
+    { header: { id: 'old-1' }, bestMatch: { seq: 3, time: '2026-09-01 10:00:00', type: 'user/message', snippet: '当年的话' } },
+  ];
+  const r1 = toSearchRows(hits, { selfId: 'me' });
+  check(r1.rows.length === 2, '两条都在(本会话**不删**,只挪位)');
+  check(r1.rows[1].conv === 'me' && r1.rows[1].isSelf === true, '★ 本会话被排到最后并标 isSelf');
+  check(r1.rows[0].conv === 'old-1' && r1.rows[0].isSelf === false, '历史命中保持在前(稳定排序,不打乱宿主原序)');
+  const r2 = toSearchRows(hits, { selfId: '' });
+  check(r2.rows[0].conv === 'me' && !r2.rows[0].isSelf, '不给 selfId ⇒ 顺序与标注都不动(旧调用点零影响)');
+
+  // 8e) 回执:标注 + 超时文案(超时≠没找到,两者下一步动作不同)
+  const withSelf = renderSearch({ ok: true, q: 'x', all: false, deep: [], skipped: 0, rows: r1.rows });
+  check(withSelf.includes('← 本会话'), '★ 回执标出「← 本会话」(别把刚说的当成"当年说过的话"引用)');
+
+  const timedOutDeep = renderSearch({
+    ok: true, q: 'x', all: false, skipped: 0, rows: [], timedOut: true, timeoutMs: SEARCH_TIMEOUT_MS,
+    deep: [{ kind: '承诺', text: '一条结论', conv_id: 'c1' }],
+  });
+  check(timedOutDeep.includes('原文层超时'), '★ 超时要明说(不许说成"没找到")');
+  check(timedOutDeep.includes('条目层是本地库'), '★ 超时也要说清"条目层不受影响" —— 手上有东西可用');
+  check(timedOutDeep.includes('一条结论'), '超时回执里条目照常给出来');
+
+  const timedOutEmpty = renderSearch({ ok: true, q: 'x', all: false, skipped: 0, rows: [], deep: [], timedOut: true, timeoutMs: 20000 });
+  check(timedOutEmpty.includes('没跑完'), '★ 两层都空 + 超时 ⇒ 说"没跑完",不许说成"没找到"');
+  check(!timedOutEmpty.includes('按内容没找到'), '超时不许落进"没找到"的旧文案(那是另一种结论)');
+}
+
+// ── 9) 本地原文层 + **本会话默认排除**(2026-10-05 夜 · 主人拍板)──────────────────────
+//   为什么值得单列一组:这是"①档默认走哪条路"与"谁的命中不算命中"两条**返回面语义**,
+//   错了不会抛异常 —— 只会在主人眼前变成"前几条全是今天和昨天"(他截图报过的那个症状)。
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE dsh_turns_raw (session_id TEXT, seq INTEGER, role TEXT, ts TEXT, text TEXT)');
+  const ins = db.prepare('INSERT INTO dsh_turns_raw VALUES (?,?,?,?,?)');
+  ins.run('me', 1, 'user', '2026-10-05 20:00:00', '我在本会话说的检索');
+  ins.run('me', 2, 'assistant', '2026-10-05 20:01:00', '本会话的另一句检索');
+  ins.run('old', 5, 'user', '2026-09-01 10:00:00', '当年说过的检索');
+  const mem = { db };
+
+  const def = searchLocalTurns(mem, '检索', 10, { selfId: 'me' });
+  check(def.rows.length === 1 && def.rows[0].conv === 'old',
+    '★ 本会话**默认整条排除**(只剩历史那一条)—— 实际:' + JSON.stringify(def.rows.map((r) => r.conv)));
+  check(def.selfExcluded === 2, '★ 被排除的条数如实报出(不然会被读成"库里只有这些")—— 实际:' + def.selfExcluded);
+
+  const inc = searchLocalTurns(mem, '检索', 10, { selfId: 'me', includeSelf: true });
+  check(inc.rows.length === 3 && inc.selfExcluded === 0, 'includeSelf=true ⇒ 全都在,且排除计数归零');
+  check(inc.rows[2].conv === 'me' && inc.rows[2].isSelf === true, 'includeSelf 时本会话仍排在最后(顺序语义不变)');
+
+  const noSelf = searchLocalTurns(mem, '检索', 10, {});
+  check(noSelf.rows.length === 3 && noSelf.selfExcluded === 0, '不给 selfId ⇒ 谁都不排除(旧调用点零影响)');
+
+  const txt = renderSearch({
+    ok: true, q: '检索', all: false, local: true, deep: [], skipped: 0,
+    rows: def.rows, selfExcluded: def.selfExcluded,
+  });
+  check(/另有 2 轮命中属于\*\*当前会话自己\*\*/.test(txt), '★ 回执说出"另有 N 轮是本会话、已排除"(不说就是假装搜过了)');
+  const txt2 = renderSearch({
+    ok: true, q: '检索', all: false, local: true, deep: [], skipped: 0, rows: def.rows, selfExcluded: 0,
+  });
+  check(!/另有/.test(txt2), '没有排除时不印那句(免得每次都多一段噪音)');
+
+  check(SEARCH_LOCAL_TURNS_MAX >= SEARCH_HITS_MAX, '本地层上限不低于宿主层(否则同一个 limit 在两条路上含义不同)');
+
+  // ⚠️ 2026-10-05 夜**真机抓到的疏漏**:**只有条目、原文 0 条**时 head 走另一支,那里漏了来源标注 ——
+  //   而"原文被排除成 0 条"恰好是最容易落进这一支的情形(真机搜「检索」就是这样:7 条条目 + 0 轮原文)。
+  const onlyDeep = renderSearch({
+    ok: true, q: '检索', all: false, local: true, rows: [], skipped: 0, selfExcluded: 3,
+    deep: [{ kind: '事实', text: 'x', conv_id: 'c' }],
+  });
+  check(/本机库内原文层/.test(onlyDeep), '★ 只有条目时也要标原文来源(否则默认路的覆盖范围无人知晓)');
+  check(/另有 3 轮/.test(onlyDeep), '只有条目时"已排除 N 轮"照样要说');
   db.close();
 }
 

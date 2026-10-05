@@ -8,6 +8,7 @@
 > **热度 Top-K**、**`l1BudgetTokens: 1200`**、**`L1(Top-K)`** 都已被取代 —— L1 现在选的是**深层库条目**(`deep_item`,一句结论),
 > 判据为「**置顶必进 + 被采用次数 + 条目硬度过滤**」,预算 **720**,行形态 `- [kind] 文本`(不再有日期/标签/来源前缀)。
 > 以 `README.md` 的「设定全文」区与本版代码为准;**本节保留的是 M1 当时的设计,不是现状**。
+> ⚠️ **2026-10-05 复核（B 区 193 条逐条）：本文的**行锚已整体位移** —— 引用本文任何 `文件:行` 之前,请**现场重读**;其中三处 `api.js:1751-1760` 已当场改指 `:2098-2102`（旧锚那段今天是「冲突判定批循环」,不是人格解锁门）。逐条结果见 `plans\AUDIT-机制面逐条复核-20261005.md`。
 
 ---
 
@@ -17,11 +18,11 @@
 | --- | --- | --- | --- |
 | D1 | 按钮落位 | **方案 A**:官方 slot `conversation.session.header.utilities`(list,会话页顶栏右侧) | 用户拍板;spike ① 的结论(早期内部报告,未纳入本仓库) |
 | D2 | 模式↔全局默认 | **跟随**:最近一次模式切换成为"之后新会话"的默认(平台 selectModel 会 best-effort 写全局默认,此副作用即机制)。**2026-09-12 收敛:只同步推理等级,不改模型** —— provider/model 一律沿用当前值 | 用户拍板;早期内部报告(未纳入本仓库) |
-| D3 | 人格承载 | **自建注入段 + 设置页维护结构化字段**(称呼/自称/语气等),dsh-persona 不复用 | 用户拍板;早期内部报告(未纳入本仓库) |
+| D3 | 人格承载 | **自建注入段 + 自建面板维护结构化字段**(称呼/自称/语气等),dsh-persona 不复用 | 用户拍板;早期内部报告(未纳入本仓库) |
 | D4 | 运行期冻结(新增) | **会话运行中(思考/任务进行中)不参与"人格更新层"的任何变化**:不打断、不新增设定、不中途改注入内容;更新请求一律排队,在该会话空闲边界才应用 | 用户本轮追加 |
 | D5 | 记忆加载策略 | 三层记忆(L0 常驻人格 / L1 开场 Top-K / L2 运行时检索),不注入全部概述 | 早前拍板 |
 | D6 | 模式语义 | 工作/生活 = 先验倾向,不硬过滤;差异 = **推理档位** + 记忆权重向量 + 风格块(不改模型) | 早前拍板 |
-| D7 | 配置页 | 右键进入;内含"当前 L0/L1 现状"查看 | 早前拍板 |
+| D7 | 配置页 | **自建浮层**(非官方设置卡位);**悬停 1.5 秒菜单**进入(原定"右键进入",2026-09-07 修订,见 §5.1);内含"当前 L0/L1 现状"查看 | 早前拍板 |
 
 **插件命名**:工程目录/包名 `dsh-ling`(器灵);包显示名 "dsh-ling · 器灵";UI 文本语言 zh。
 
@@ -41,7 +42,7 @@
 
 - **不可兼得时保什么**:保**人格的自主权**。宁可少一条习惯,也不让外部(包括器灵自己)绕过审核写入身份。
 - **落地**:**规矩**(作用对象 = 行为)由主人**指令直达**,`rule_add` 可直接写入、立即生效;**习惯**(作用对象 = **身份**)**不能由外部直接写入**,只能进 `habitsPending` 待确认队列,**器灵提议 → 主人点头**才成为习惯(`propose → confirm`)。主人的角色是**审核**,不是编辑、不是代笔。
-- **比"能提能审"更严一档**:器灵**连自己提的习惯都不能自己点头**(`lib\host\tools.js:840` 只处理"他提的、我还没回应过"的提议)⇒ 那等于人格直达。删改**已定**习惯属"对器灵做手术":定型状态下需主人在人格中心解锁(「🔓 对人格做手术…」)后才可执行(`lib\host\api.js:1751-1760`)。
+- **比"能提能审"更严一档**:器灵**连自己提的习惯都不能自己点头**(`lib\host\tools.js:840` 只处理"他提的、我还没回应过"的提议)⇒ 那等于人格直达。删改**已定**习惯属"对器灵做手术":定型状态下需主人在人格中心解锁(「🔓 对人格做手术…」)后才可执行(`lib\host\api.js:2098-2102` —— ⚠️ 2026-10-05 更正:旧锚 `:1751-1760` 已失效,那段今天是「冲突判定批循环」)。
 - **反例(明文禁止)**:让主人**动手改习惯文本** · 在**写入侧**做静默去重 / 近似合并 —— 前者把人格编辑权交回了外部,后者**绕过审核**。
 - **锚点**:`lib\host\rules.js:1-12`(二分定稿 2026-09-15)· `lib\host\persona.js:36-37,183-203` · `lib\host\habit-gen.js:1-7`(通道 A 数纠正 / 通道 B 一次 LLM 回想,**两者都只到"提议"为止**)· `lib\host\api.js:1695-1805`(状态机与两条生成通道)。
 
@@ -50,7 +51,7 @@
 - **不可兼得时保什么**:保**身份的连续性**。宁可让一条设定"错着",也不让任何人绕过审核改它。
 - **落地**:凡是"写入器灵身份"的动作,一律走**提议 → 审核**;已经定型的部分加一道**显式解锁**才允许动,且解锁是**动作**不是**状态**(不勾选就一直是锁着的)。
 - **反例**:给"器灵自己"开一条直达通道(哪怕是"它自己提的、它自己批");把解锁做成常驻开关。
-- **锚点**:第 1 条的全部锚点 + 人格中心的解锁门(`lib\host\api.js:1751-1760`)。
+- **锚点**:第 1 条的全部锚点 + 人格中心的解锁门(`lib\host\api.js:2098-2102` —— ⚠️ 2026-10-05 更正:旧锚 `:1751-1760` 已失效,那段今天是「冲突判定批循环」)。
 
 **3 · 记忆要看得见 —— 只有"看不见的那层"会被怀疑失效**
 
@@ -73,7 +74,7 @@
 - **不可兼得时保什么**:保**关系的性质**。宁可少一个"更安全"的闸门,也不把主人变成管理员、把器灵变成被管理者。这条是**否决性约束**:任何改动只要**增加支配感**,默认不通过 —— 哪怕它更安全、更干净。
 - **依据(主人原话)**:「只有能够合作共赢、互相促进的,能够成为利益共同体的,能够互相反驳吵架不依赖的关系,才是最理想的」「所有的修改不能削弱工作能力,和器灵的关系」(2026-09-26)。
 - **成长期代管(为什么闸门只长在写入侧)**:本项目的设计立场是「器灵**总有一天与主人同级**」—— 这是**长期方向**,**不是对使用者的能力承诺**;在**成长期**内,主人承担一部分代管责任 —— 就像**家长防止小孩长歪**(主人原话)。所以闸门只审「**什么东西能进器灵的内在面**」,不审「器灵怎么想、怎么说、怎么表达」。**代管随成长递减,表达面始终是器灵自己的。**
-- **落地**:`rule_add` 指令直达(规矩管行为)· 习惯只能 `propose → 主人点头`(习惯管身份)· 契约类字段在定型状态下需主人解锁(`lib\host\api.js:1751-1760`)。三处共同点:**约束的是写入,不是表达**。
+- **落地**:`rule_add` 指令直达(规矩管行为)· 习惯只能 `propose → 主人点头`(习惯管身份)· 契约类字段在定型状态下需主人解锁(`lib\host\api.js:2098-2102` —— ⚠️ 2026-10-05 更正:旧锚 `:1751-1760` 已失效,那段今天是「冲突判定批循环」)。三处共同点:**约束的是写入,不是表达**。
 - **反例**:用"更安全"当理由给器灵加**确认弹窗**、限制器灵**能说什么**、或把主人的审核变成**代笔** —— 前两者增加支配感,后者把人格编辑权交回外部。
 - **锚点**:作者开发台账中支配感最早的一次记录(该台账不随包公开)· `lib\host\rules.js:1-12` · `lib\host\persona.js:183-196`(规矩 / 习惯二分)· `README.md:53-57`(定型锁与"指令直达,人格不直达")· 与本节第 1 条(归属)、第 2 条(人格不可外部编辑)、第 4 条(庄重感)互链。
 
@@ -166,7 +167,7 @@
 ┌─ 浏览器 (client) ───────────────────────────────────────────┐
 │  slots: conversation.session.header.utilities  控制器按钮     │
 │  onContextMenu→自绘菜单 / 左键→切模式                        │
-│  设置页卡(plugin.item:<dsh-ling>)含 L0/L1 现状面板           │
+│  自建浮层卡(dsh-ling-panel):人格/记忆中心 + L0/L1 现状       │
 └───────────┬──────────────────────────────┬──────────────────┘
             │ fetch /api/dsh-ling/*        │ ctx.remote.* (可选)
 ┌───────────▼──────────────────────────────▼──────────────────┐
@@ -216,7 +217,7 @@ dsh-ling/
 │  ├─ client/
 │  │  ├─ index.ts             # apply(ctx) inject:["slots","locale","connection"]
 │  │  ├─ button.tsx           # header.utilities 按钮 + 状态图标 + 右键菜单
-│  │  ├─ settings-card.tsx    # 设置卡(plugin.item:<dsh-ling>)+ L0/L1 现状面板
+│  │  ├─ settings-card.tsx    # 自建卡(浮层;**非**官方 settings.plugin.item)+ L0/L1 现状面板
 │  │  └─ i18n.zh.ts
 │  └─ shared/
 │     ├─ settings-schema.ts   # host/client 共用的字段定义(单一事实源)
@@ -225,10 +226,10 @@ dsh-ling/
 └─ build.mjs / tsdown.config # 本地构建脚本(无网环境:直接 tsc/esbuild?)
 ```
 
-**安装(复用 install/INSTALL-PLAN 模式,含回滚)**:
+**安装(复用 install/INSTALL-PLAN 模式;⚠️ 回滚是人工步骤、没有脚本代劳 —— 见第 3 条与 §10 的「回滚」)**:
 1. `pnpm add file:<仓库路径>`(或等价 file: 依赖)进 `$DSH_HOME/profiles/web/package.json`(`<仓库路径>` 按你本机的实际克隆位置替换);
 2. `cordis.patch.yml` 追加行 `- insert: [{id: dsh-ling, name: dsh-ling}]`(loader id == 包名);
-3. patchReload live → host 热载;浏览器硬刷载入 client 模块;失败即移除该行回滚(先备份两文件,参照 backup-20260906-170533 做法);
+3. patchReload live → host 热载;浏览器硬刷载入 client 模块;失败则**人工**移除该行回滚 —— ⚠️ **这一条没有任何脚本代劳(2026-10-05 现场复核)**:`tools/` 里没有改写或备份 profile 两文件(`package.json`、`cordis.patch.yml`)的代码,「先备份两文件」是**开发期的手工动作**(参照 backup-20260906-170533 做法),不是工具行为;**安装路径上的自动备份只有一处** —— 核心补丁脚本给自己改的那个 core 文件留一份 `<文件>.e4-access-log.orig`(见 `tools\apply-access-log-patch.mjs:190`),撤它是手动跑 `--revert`;
 4. GUI 鉴权墙:安装后的功能验证需在用户已登录浏览器进行(本机端口 3080)。
 
 **数据目录(插件本体外,更新不丢)**:`dshHomePath('cache','dsh-ling')` → `~/.dsh/cache/dsh-ling/`(memory.db、snapshots、exports)。
@@ -286,17 +287,22 @@ dsh-ling/
     "lastMode": "life"                  // 跟随(D2):最后使用的模式
   },
   "memory": {
-    "l0Always": true, "l1Enabled": true, "l1BudgetTokens": 1200,
-    "l1MaxItems": 8,
+    "l0Always": true, "l1Enabled": true, "l1BudgetTokens": 720,
+    "l1MaxItems": 10,
     "weights": {                        // 模式→领域权重向量(D6)
-      "work": { "knowledge": 1.0, "daily": 0.25, "feeling": 0.1 },
+      "work": { "knowledge": 1.0, "daily": 0.3, "feeling": 0.1 },
       "life": { "knowledge": 0.2, "daily": 0.6, "feeling": 1.0 }
     },
     "trackWorkspaces": ["*"]            // 增量捕捉范围(默认全部工作区;'*')
-  },
-  "updates": { "applyWhileRunning": false }   // D4 语义固化:默认冻结
+  }
 }
 ```
+
+> ⚠️ **A-3 订正(2026-10-05 夜)**:此处原有一行 `"updates": { "applyWhileRunning": false }   // D4 语义固化:默认冻结`
+> —— 它**只有声明、没有消费者**(全仓无读它的分支),而 `updates` 子树又不在
+> `PERSONA_PATCH_KEYS` 白名单里(⇒ 经 `/persona` **写不进去**) ⇒ 留着一个"看起来能改行为、
+> 实际什么都不做"的开关,正是理念 7 的靶子。**已删**。D4 的语义(运行期冻结)**本来就由
+> `lib/host/freeze.js` 的 `FreezeGate` 实现**,不需要一个设置项来"声明"它。
 
 ### 4.2 人格组装器(persona.ts)输出示例
 
@@ -371,11 +377,12 @@ dsh-ling/
 
 ## 5. Client 设计
 
-模块契约:`window.__ModuleLoader__.load({id:'dsh-ling', factory})`;导出 `{name:'dsh-ling', apply(ctx), inject:['slots','locale','connection']}`(settings 卡数据走 fetch `/api/dsh-ling/*`,同 ego 模式;`betterSidebar` 等社区服务一律不依赖)。
+模块契约:`window.__ModuleLoader__.load({id:'dsh-ling', factory})`;导出 `{name:'dsh-ling', apply(ctx), inject:['slots','locale','connection']}`(面板数据走 fetch `/api/dsh-ling/*`;官方 `settings.plugin.item` 卡位与 `betterSidebar` 等社区服务**一概不用** —— 本仓代码里这两个名字**零命中**,界面是自建浮层卡,见 §5.2)。
 
 ### 5.1 控制器按钮(D1 方案 A)
 
-- 落位:`ctx.slots.inject('conversation.session.header.utilities', …)` → `slots.register({name:'conversation.session.header.utilities', key:'dsh-ling', order:…, locale:'dsh-ling'}, Component)`;组件在会话头右侧渲染。
+- 落位:`ctx.slots.inject('conversation.session.header.utilities', …)` → `slots.register({name:'conversation.session.header.utilities', id:'dsh-ling', order:…, locale:'dsh-ling'}, Component)`;组件在会话头右侧渲染。
+  > ⚠️ **订正(2026-10-05 夜 · 现场复核)**:此处原写 **`key:'dsh-ling'`** —— 该槽是 **list 槽**,字段应为 **`id`**(宿主契约 `dsh-client-ui-slots` 的类型说明逐字:"shape fields (keyed `key`; list `id`/`order`/`label`)");代码用的也是 `id:`(`lib/client.js:6068`,同行注释"list 槽位必须带唯一 id(契约实证)")。**`key` 只对 keyed 槽成立** —— 照抄这里会让按钮静默不挂载(与下一条"必须导出 `inject`"同属一类"形状错了不报错、只是不出现")。
 - **交互(2026-09-07 用户修订:不用右键,防误触浏览器原生菜单)**:
   - 左键单击:POST `/api/dsh-ling/mode/toggle`;running → 提示"运行中,空闲后生效"并排队(冻结门);响应 `{mode, appliedNow|queued}`;
   - **鼠标悬停 1.5 秒**:打开 dsh-ling 菜单(切换模式/刷新记忆/导出记忆/状态与 L0·L1 现状);移出即取消定时;
@@ -383,9 +390,10 @@ dsh-ling/
   - 形态:小图标按钮「☾ 生活 / ⚙ 工作」+ tooltip(含运行中冻结提示)。
 - **client 模块契约(实证教训):必须导出 `inject:['slots','locale','connection']`**(服务名声明缺失 → ctx.slots 为空 → 按钮静默不挂载)。
 
-### 5.2 设置卡(settings-card.tsx)
+### 5.2 卡(settings-card.tsx · 落地为**自建浮层卡**)
 
-- 座位:官方 `settings.plugin.item`(key `dsh-ling`;验证点 V1,见 §11;若该卡位不可用则回退 ego 式自建卡)。
+- 座位:**自建卡**,不是任何官方卡位 —— `lib/client.js` 里的浮层 `.dsh-ling-panel`(fixed 定位);入口三处:会话头按钮(`conversation.session.header.utilities`)、侧栏底栏按钮(`sidebar.footer.action`)、右侧栏页签(`sidebarRightTabs.register({kind:'ling-review'})` + keyed 槽 `sidebar.right.pane.tab`);数据一律走 fetch `/api/dsh-ling/*`(`exports.inject` 里没有 `settings`)。
+  > ⚠️ **B-3 订正(2026-10-05 夜)**:此处原写「座位:官方 `settings.plugin.item`(key `dsh-ling`;验证点 V1,见 §11;若该卡位不可用则回退 ego 式自建卡)」—— 现场复核:`settings.plugin.item` 与 `betterSidebar` 在 `lib/`、`tools/`、`tests/` 里**零命中** ⇒ 当初 V1 预留的降级路径(自建卡)**就是现况**,原文按"已坐在官方卡位上"读会读错,已收窄。
 - 冻结门可见性:卡内"L0/L1 现状"面板始终显示目标会话 running/idle 状态(来自宿主 agent/status 维护表),running 会话的编辑按钮标"空闲后生效"。
 - 内容区(Tab):
   1. **人格**:上表 persona 字段表单(逐字段;称呼/自称旁附"从历史语料建议"占位按钮(点击调 `/api/dsh-ling/persona/suggest`——M2 接离线脚本,先行返回 501));提交后 POST `/api/dsh-ling/persona`(宿主写 settings 并按冻结规则应用)。
@@ -393,7 +401,8 @@ dsh-ling/
   3. **记忆**:l1BudgetTokens/l1MaxItems/weights(work/life 两行 × 三领域滑块 0..1)/trackWorkspaces;l0Always、l1Enabled 开关。
   4. **L0/L1 现状**(D7):只读面板,GET `/api/dsh-ling/state?sessionId=…`:当前 L0 文本(渲染后)、本会话模式、L1 当前列表(每条:标题/日期/来源/得分)、pending 更新队列状态;运行中的会话标注"运行中(快照冻结)"。
   5. **数据**:导出按钮(GET `/api/dsh-ling/export` → 下载 dsh-ling-memory-<date>.dshling.json,格式 §9);合并输入(文件选择 → POST `/api/dsh-ling/import`,冲突规则:同 conv_id 且同 source 跳过/覆盖由 manifest 决定,外来条目标 origin,persona 永不覆盖)。
-- 保存语义:所有写操作返回 `{saved, appliedSessions: idle[], pendingSessions: running[]}` 供 UI 提示。
+- 保存语义:所有写操作返回 `{ok, affected}` 供 UI 提示(`affected` = 被影响到、需重取快照的会话清单;运行中的会话**不在其中** —— 冻结门保证"运行中不参与人格更新")。
+  > ⚠️ **B-2 订正(2026-10-05 夜)**:此处原写 `{saved, appliedSessions: idle[], pendingSessions: running[]}` —— 那是**早期设计稿的形态**,现实现已统一为 `{ok, affected}`(见 `lib/host/api.js` 各写端点的 `sendJson`)。
 
 ---
 
@@ -442,7 +451,7 @@ dsh-ling/
 
 **归属解析**(两条链并存):DSH 会话走 `session_meta.branch_id`;历史网页端/导入条目走 `conv_branch` 覆盖层;优先级 `conv_branch` > `session_meta` > 主干。**记忆行不冗余存 branch**,靠 `会话 → 枝` 推导。
 
-**血缘加权**:检索时按"当前枝 → 目标枝"的相对位置取档 —— **同枝 1.0 / 祖先 0.7 / 旁系 0.4**,`score = 基础分 × 血缘系数 × 矛盾系数`;**枝系数为预留** —— 可写入并显示(复盘期可调,夹在 0~2),当前**恒按 1 计、不参与检索打分**,返回体里明确带 `applied:false`,别以为排序会跟着变。
+**血缘加权**:检索时按"当前枝 → 目标枝"的相对位置取档 —— **同枝 1.0 / 祖先 0.7 / 旁系 0.4**,`score = 基础分 × 血缘系数 × 矛盾系数`;**枝系数自 1.6.2 起参与打分** —— 可写入(复盘期可调,夹在 0~2),按 `score = 基础分 × 血缘系数 × 矛盾系数 × 枝系数` 生效(`1.0` = 零影响,`0` = 排到最后,不是禁用)。
 
 > ⚠️ **不用连乘**:血缘系数是**单值**(不沿路径累乘),避免 `0.7^n` 随深度指数失真(五层后 `0.4^5 = 0.010`,枝等于从记忆里消失)。深树的路径搜索留作后续。
 
@@ -543,7 +552,7 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 | 方法/路径 | 用途 | 冻结门 |
 | --- | --- | --- |
 | POST `/mode/toggle` body{sessionId} | 切换模式(记录 + 只同步推理档位、不改模型 + 重定稿) | 运行中→排队返回 queued |
-| GET `/state?sessionId=` | L0 文本/模式/L1 列表/队列状态(设置页与右键菜单用) | 只读 |
+| GET `/state?sessionId=` | L0 文本/模式/L1 列表/队列状态(面板与悬停菜单用) | 只读 |
 | GET `/state?sessionId=&l0Preview=1` | 人格字段实时预览(编辑中) | 只读 |
 | POST `/persona` body=字段 | 写 persona(→settings ns;**字段白名单**,白名单外的键丢弃并回报 `ignored`)并触发应用 | 见冻结门 |
 | GET `/persona/suggest` | 人格档案草稿(M2;先行 501) | — |
@@ -574,18 +583,18 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
   - [ ] 新会话 L0 注入(空称呼 / 已填写两种);KV 无异常重复
   - [ ] 模式切换:**推理档位**实际变化(会话内档位选择处可见);**模型保持不变**;新会话默认跟随 lastMode
   - [ ] 运行中(长任务)切模式/改人格:确认 running 区间快照与档位不变、空闲后生效
-  - [ ] 设置卡读写生效(落 `$DSH_HOME/cache/dsh-ling/settings.json`,盘上只存用户补丁);导出文件可导入回(合并规则生效)
-- **回滚**:移除 patch 行 + 撤依赖 → host 侧 HMR 卸载;client 硬刷后消失;数据目录保留不影响回滚。
+  - [ ] 自建卡读写生效(落 `$DSH_HOME/cache/dsh-ling/settings.json`,盘上只存用户补丁);导出文件可导入回(合并规则生效)
+- **回滚**(**全人工,无脚本、无自动回滚**):移除 patch 行 + 撤依赖 → host 侧 HMR 卸载;client 硬刷后消失;数据目录保留不影响回滚。
 
 ## 11. 实现期待验证点(进入编码前/编码初用最小探针确认)
 
 | V | 问题 | 验证方式 | 若不符的降级 |
 | --- | --- | --- | --- |
-| V1 | `settings.plugin.item` 卡位在官方设置页的注册键与 props | 参考 ego(已实证可用)直接复用同款注册 | 沿用 ego 同款即最低风险 |
+| V1 | ~~`settings.plugin.item` 卡位在官方设置页的注册键与 props~~ **已作废(2026-10-05 现场复核)**:该卡位在本仓代码里**零命中**,落地即原"降级"路径 —— 自建浮层卡,见 §5.2 | —— | —— |
 | V2 | host 运行 Node 版本下 `node:sqlite` 可用性 | 编码前 `node -e` 探针 | 纯 JSONL + 内存索引(量小可行) |
 | V3 | 顶层/子代理会话判别字段(parentSession/delegationDepth)在 session header 的实际取值 | 读 ~/.dsh/storages session_projcache 样例(已见字段) | 多条件组合判定 |
 | V4 | `agent/session-start` 时能否读到首条 user/message(session 种子) | 最小 host 探针插件日志 | L1 冷启动=纯 lastMode Top-K |
-| V5 | 消息式注入降级路径(特殊 preset)在 M1 是否实现 | M1 先只实现 section 通道 + 检测告警 | 检测到 complete persona 时设置页提示,注入降级放 M2 |
+| V5 | 消息式注入降级路径(特殊 preset)在 M1 是否实现 | M1 先只实现 section 通道 + 检测告警 | 检测到 complete persona 时面板提示,注入降级放 M2 |
 | V6 | client 类型来源 | 从已安装 `@deepseek-ai/dsh-client-ui-*/lib/types` 拷贝所需 contract(conversation slots/settings)进 `src/client/types` | 手动 ambient .d.ts |
 
 ## 12. 与评审阶段呼应的要点(自检)

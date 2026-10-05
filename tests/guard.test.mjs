@@ -550,6 +550,71 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
     'B 护栏:preview 端点不再直接吃任意路径');
 }
 
+// ── 9.3b A-1(2026-10-05 夜):两条"习惯候选"写面必须过手术门 ─────────────────────────────
+// 来源:`plans\HANDOFF-机制面复核交办单-20261005.md` §A-1(机制面逐条复核 A 栏第一项,安全面)。
+// 事实:`/persona/habits/scan` 与 `/persona/habits/reflect` 都会经 `proposeHabit` 把候选写进
+//   `habitsPending`(进人格面),而确认侧 `/persona/habit` **是过门的** ⇒ 一条通路的两半只改了一半,
+//   正是 DESIGN §0.1 理念 9「两半同批」的反例。
+// 这里用**源码级**护栏(与 `:140` 那条 `api.js 的 guard 走了 guardVerdict` 同一形态):
+//   行为级(真起服务、带代理头调这两条)由真机复跑覆盖 —— 本测试不启 HTTP 服务。
+// ⚠️ 判据必须落在**该端点的 handler 块内**:`gateSurgery` 在 api.js 里有多处调用,
+//   全文级 `includes` 会被别处的接线喂饱 ⇒ 先按 `register('<路由>'` 切块再判。
+{
+  const src = readFileSync(join(root, 'lib/host/api.js'), 'utf8');
+  const blockOf = (route) => {
+    const i = src.indexOf(`register('${route}'`);
+    if (i < 0) return '';
+    const j = src.indexOf('disposers.push(register(', i + 10);
+    return src.slice(i, j < 0 ? src.length : j);
+  };
+  for (const ep of ['/persona/habits/scan', '/persona/habits/reflect']) {
+    const b = blockOf(ep);
+    check(b.length > 0, `A-1 前置:找得到 ${ep} 的 handler 块`);
+    check(/if \(!gateSurgery\(req, res, sendJson, \{ unlock: body\.unlock \}/.test(b),
+      `★A-1 手术门:${ep} 的 handler 里接了 gateSurgery(交办单判据①)`);
+    check(/const body = JSON\.parse\(\(await readBody\(req\)\) \|\| '\{\}'\)/.test(b),
+      `★A-1 手术门:${ep} **先解析 body、再判门**(请求流只能读一次 ⇒ 顺序反了门就拿不到 unlock)`);
+    check(!/async \(_req, res\)/.test(b),
+      `★A-1 手术门:${ep} 的 handler 必须收 req(改前是 _req ⇒ 根本读不到原句)`);
+    check(b.includes(`endpoint: '${ep}'`), `★A-1 手术门:${ep} 把端点名传给留痕`);
+  }
+  // ⚠️ `surgery.js:34-49` 的**覆盖面清单**把 `/persona/genesis` 列为**第 11 条写面**(改后 = 过门),
+  //   而 `api.js:2943` 也确实接了门 ⇒ 它**应该**过门。
+  //   ⇒ 本断言原写成"它有意不过门"(照抄交办单 A-1 的建议),**现场重读推翻了那句话**:
+  //     交办单说"genesis 不写人格 ⇒ 不计入写面,别顺手接上",但清单明确列它为第 11 条。
+  //     以清单为准(它是唯一逐条列出的权威),已回告交办单作者。
+  const g = blockOf('/persona/genesis');
+  check(g.length > 0 && /gateSurgery/.test(g),
+    '★A-1 清单对齐:/persona/genesis 是清单第 11 条写面 ⇒ 必须过门(交办单 A-1 那句"别顺手接上"与清单冲突,以清单为准)');
+}
+
+// ── 9.3c A-2(2026-10-05 夜):面板档必须带 sessionLine / deepDone ──────────────────────────
+// 来源:`plans\HANDOFF-机制面复核交办单-20261005.md` §A-2 —— 交办单说「面板档**漏列** sessionLine,
+//   而前端 client.js 有读」。**现场重读判定为误报**,但顺手把事实链钉成断言(将来真被挪走会红):
+//   · 前端**发**:client.js 面板打开时发 `/state?…&l0Preview=1`;
+//   · 后端**收**:api.js 的 `/state` handler 把 `q.get('l0Preview') === '1'` 传成 `l0Preview`;
+//   · 面板档**给**:`stateFor` 的 l0Preview 分支里两个字段都在,且取值仍挂在 `l0Preview` 上;
+//   · 前端**读**:client.js 读 `r.sessionLine`,而那个 `r` 就是面板档应答(`paintE3` 的注释逐字写着
+//     "同一份面板档应答")。
+//   ⇒ 误报来源是 client.js 那句**容错注释**("老后端 / 轮询档没有这一项 ⇒ null"):它在讲"万一拿到
+//     不带它的应答也别崩",被读成了"前端在读轮询档"。断言只钉**事实链**,不钉注释措辞。
+{
+  const api = readFileSync(join(root, 'lib/host/api.js'), 'utf8');
+  const cli = readFileSync(join(root, 'lib/client.js'), 'utf8');
+  const iLight = api.indexOf('if (!l0Preview) return light;');
+  check(iLight > 0, 'A-2 前置:找得到「轮询档早退」那一句(分档的判据本体)');
+  const panel = api.slice(iLight, iLight + 3000);   // 早退之后就是面板档那半
+  check(/sessionLine:\s*l0Preview\s*\?/.test(panel),
+    '★A-2 面板档带 sessionLine,且取值挂在 l0Preview 上(轮询档一个字节都不带)');
+  check(/deepDone:\s*l0Preview\s*\?/.test(panel), '★A-2 面板档带 deepDone(同上)');
+  check(/l0Preview:\s*q\.get\('l0Preview'\)\s*===\s*'1'/.test(api),
+    '★A-2 /state 把 `l0Preview=1` 传成面板档标记(前端发的就是它)');
+  check((cli.match(/r\.sessionLine/g) || []).length === 1,
+    '★A-2 前端只有一处读 r.sessionLine(多处 = 有人把同一个字段接到了轮询档)');
+  check(/function paintE3\(r, cur, fmtClock\)/.test(cli) && cli.includes('l0Preview: \'1\''),
+    '★A-2 读它的 r 来自 paintE3,而面板那条请求带 l0Preview=1');
+}
+
 // ── 9.4 C(审计建议):POST_ONLY 差集**快照护栏** ─────────────────────────────────────────────
 // 这是**快照,不是白名单**:它把"截至本次改动,哪些已注册端点不在 POST_ONLY 里"逐条钉住,
 // 好让**将来新增/删除端点时断言变红**,逼后来者**有意识地**回答一句:"这条是写面吗?"

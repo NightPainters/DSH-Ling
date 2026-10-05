@@ -294,5 +294,45 @@ const ids = (r) => r.items.map((i) => i.id);
   check(r3.items.filter((x) => String(x.text).startsWith('软事实')).length === 0, 'long 的事实不占席位');
 }
 
+// 13) A-5(2026-10-05):枝系数**真的改排序** —— 判据是"调低某条枝 ⇒ 从这条枝的会话里提炼出的
+//     结论往后排",不是"回执说它生效了"。接线口径:一条记忆的枝 = **它来源会话所在的枝**
+//     (条目自身不挂枝:实测 393/393 条 `deep_item.branch_id` 为空)。
+{
+  const mkStore = (rows, { scales = {}, convBranch = {} } = {}) => ({
+    listDeepItems: () => rows,
+    listBranches: () => Object.entries(scales).map(([id, w]) => ({ id, weightScale: w })),
+    convBranchMap: () => new Map(Object.entries(convBranch).map(([k, v]) => [k.replace('|', '\u0000'), v])),
+    sessionBranchMap: () => new Map(),
+  });
+  const mk = (id, conv, text) => item({ id, conv_id: conv, src: 'dsweb', text, kind: '事实', durability: 'long' });
+  const rows = [mk('di:a', 'cA', '甲枝的结论'), mk('di:b', 'cB', '乙枝的结论')];
+  const opt = { mode: 'work', maxItems: 8, budgetChars: 4000 };
+
+  const flat = selectL1(mkStore(rows), opt);
+  check(flat.items.length === 2, 'A-5 前置:两条同形条目都入选(实际 ' + flat.items.length + ')');
+  check(Math.abs(flat.items[0].score - flat.items[1].score) < 1e-9, 'A-5 前置:默认(枝系数全为 1)两者同分');
+
+  // 把甲枝压到 0.5 ⇒ 甲必须掉到乙后面,且分数正好减半
+  const r2 = selectL1(mkStore(rows, {
+    scales: { 'br:jia': 0.5 },
+    convBranch: { 'dsweb|cA': 'br:jia', 'dsweb|cB': 'br:yi' },
+  }), opt);
+  check(ids(r2).join(',') === 'di:b,di:a',
+    '★A-5 压枝系数 ⇒ 该枝的结论掉到后面(实际 ' + ids(r2).join(',') + ')');
+  const half = flat.items.find((x) => x.id === 'di:a').score / 2;
+  const now = r2.items.find((x) => x.id === 'di:a').score;
+  check(Math.abs(now - half) < 1e-9, '★A-5 分数正好是原来的 1/2(实际 ' + now.toFixed(4) + ' vs ' + half.toFixed(4) + ')');
+
+  // 留痕必须写出第三个乘数 —— 否则又是"留痕与公式不符"
+  const why = String(r2.items.find((x) => x.id === 'di:a').why || '');
+  check(/× 枝系数0\.50/.test(why), '★A-5 留痕印出枝系数(实际:' + JSON.stringify(why.slice(0, 90)) + ')');
+  const whyFlat = String(flat.items[0].why || '');
+  check(!/枝系数/.test(whyFlat), 'A-5 系数为 1 时留痕**不印**枝系数(与接线前逐字相同)');
+
+  // 零开销路径:枝系数全 1 ⇒ 连映射都不建(桩里没有那两个方法也不该抛)
+  const r3 = selectL1({ listDeepItems: () => rows }, opt);
+  check(r3.items.length === 2, 'A-5 零开销路径:没有枝映射方法也不抛、照常选(实际 ' + r3.items.length + ')');
+}
+
 console.log(ok ? 'L1 换料(深层库条目) 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

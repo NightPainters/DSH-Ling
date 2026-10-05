@@ -21,6 +21,8 @@
 - 本插件的回答与记忆摘要**由人工智能生成**,可能存在错误,请自行判断。
 - 本项目面向**具备自行配置与运维能力**的用户;不面向未成年人,也不提供任何形式的在线陪伴服务。
 
+**想先知道它凭什么这么做?** 读 **[`PHILOSOPHY.md`](./PHILOSOPHY.md)** —— 目标为什么是"一种循环"、为什么复盘必须有"人在循环里"、它凭什么不越界、以及"不牺牲工作能力"背后的取舍。功能与设定的规格在本 README 的「设定全文」。
+
 ---
 
 <!-- 截图清单(仓库 images/ 目录):
@@ -68,7 +70,7 @@
 
 > **关于那道「手术门」**:亲手敲承诺句是**庄重感与自我提醒** —— 让你在改契约之前停一下、确认这是自己的决定;它**不是安全边界**(「禁粘贴」只是界面上的约定,挡不住任何有心的人)。真正把门的是**来源栅栏**:Host 必须是 loopback(或你显式写进受信名单的地址);另有一个**默认不开**的开关 `guard.allowLan` —— **一旦打开,整段局域网地址都算受信来源**(那是**放宽**,不是建议)。跨站请求直接拒,带 `Origin` 时其 host 必须等于请求的 Host(**带了但解析不出来就直接拒**),而**不带 `Origin` 的请求这条校验会跳过** —— 它不是"每个请求都必须带 Origin 且同源";再叠一道 cookie **名字**对撞 —— 期望名字按当前 Host 现算(`dsh-auth-` + 哈希),**只校验名字、不校验值的签名**。所以这道门挡的是"别的设备、别的页面"这类来源,而**本机原生进程本来就还能调用**(它也能直接读 `settings.json` 与记忆库,不算提权)—— 别的来源没有凭据就进不来这台机器上的 `/api`,敲对承诺句也没用。
 
-> **这道门现在长这样 —— 三条手续缺一不可**:① **只在本机做** —— 判据是"这次请求没有经过任何代理"(带代理头、或连 User-Agent 都没有的请求,都算非本机 ⇒ 拒,理由码 `surgery-local-only`);② **每次启动取一次票据** —— 票据每启动轮换,只下发给本机直连的请求(`POST /surgery/ticket`),客户端首次手术前取一次、之后随请求带上;③ **原句匹配** —— 敲出的承诺句要与当初写下的那一句相符。这三条由 `lib/host/surgery.js` 里**一处** `requireSurgery()` 判定,覆盖**全部 12 条**能改人格 / 规矩 / 习惯的写面(调用点不许再各写一份;曾有一条 `wantLock` 绕过分支,已删除)。每次手术都留痕:`$DSH_HOME/logs/surgery-YYYY-MM.jsonl`(append-only,整行哈希链,改一行即断链);`GET /surgery/events` 是只读事件面。
+> **这道门现在长这样 —— 三条手续缺一不可**:① **只在本机做** —— 判据是"这次请求没有经过任何代理"(带代理头、或连 User-Agent 都没有的请求,都算非本机 ⇒ 拒,理由码 `surgery-local-only`);② **每次启动取一次票据** —— 票据每启动轮换,只下发给本机直连的请求(`POST /surgery/ticket`),客户端首次手术前取一次、之后随请求带上;③ **原句匹配** —— 敲出的承诺句要与当初写下的那一句相符。这三条由 `lib/host/surgery.js` 里**一处** `requireSurgery()` 判定,覆盖**全部 14 条**能改人格 / 规矩 / 习惯的写面(调用点不许再各写一份;曾有一条 `wantLock` 绕过分支,已删除)。每次手术都留痕:`$DSH_HOME/logs/surgery-YYYY-MM.jsonl`(append-only,整行哈希链,改一行即断链);`GET /surgery/events` 是只读事件面。
 >
 > **承诺句只在本机回显**:`/state`(含面板档)、`/persona/history`、`/export` 这些读面,**带代理头**时只回 `hasSeal` 与 `phraseHidden`、不回原句,**本机直连**照旧回显 —— 所以你换台机器看面板不会因此被卡住,远端也拿不到原句。
 >
@@ -111,7 +113,7 @@
 - **不连乘**:血缘系数是**单值**,不沿路径累乘 —— 否则五层之后 `0.4^5 ≈ 0.01`,深层枝等于从记忆里消失。
 - **内容零改写**(硬性不变量):**除了"主脉提炼再次采纳会覆盖上一版"这一个例外**(覆盖前自动归档),任何树操作都不改写任何一条记忆的内容;分枝 / 并脉 / 连边只增加"关系",从不"融合内容"。
 - **矛盾只标记不改写**:一对记忆被判重复/矛盾时先**标记**;未复盘时检索**以较新的那条为准**(旧的一条降权 ×0.3,**不删除**;被**驳回**的与被标成**重复**的那一对不参与降权)。
-- **枝系数是预留字段**:复盘期可以调(0~2,夹紧后写入并显示),但它**当前不参与检索打分** —— 返回体里明确带 `applied:false`,别以为排序会跟着变。
+- **枝系数会真的改变排序**(1.6.2 起):复盘期可以调(0~2,夹紧后写入)。它按 `raw × 血缘 × 矛盾 × 枝系数` **参与检索打分** —— 调低某条枝的系数,从这条枝的会话里提炼出的结论就会在记忆开场里往后排(`1.0` = 不偏不倚,`0` = 排到最后,**不是禁用**)。
 
 **复盘 — 不是一个开关,是"左会话 + 右复盘栏"这个状态**:
 
@@ -175,7 +177,7 @@ dsh plugin --profile web add @nightpainters/dsh-ling
 # 2) 只验证配置层,先不启动
 dsh --profile web --dump-config     # 应能看到一行 "# == @nightpainters/dsh-ling" 层
 
-# 3) 给 DSH 核心打一行补丁(可取证访问日志要用;幂等/可回滚)
+# 3) 给 DSH 核心打一行补丁(可取证访问日志要用;幂等;这一页各步里**只有这一步**自带回滚)
 node ~/.dsh/profiles/web/node_modules/@nightpainters/dsh-ling/tools/apply-access-log-patch.mjs
 #    不打也一切照常 —— 只是访问日志为空;但**会提醒**:侧栏挂常驻 ⚠(判据 installed===false 且 reason 为 patch-missing;只有**有意关掉** config.accessLog.enabled=false ⇒ reason 为 disabled-by-config 才不染红)
 #    DSH 升级/重装后需重跑一次(补丁随包被覆盖)
@@ -183,6 +185,8 @@ node ~/.dsh/profiles/web/node_modules/@nightpainters/dsh-ling/tools/apply-access
 
 # 4) 重启宿主(host),然后浏览器 Ctrl+Shift+R 硬刷
 ```
+
+> ⚠️ **「可回滚 / 先备份」的确切范围(别读宽了 —— 2026-10-05 现场复核)**:**两套步骤里只有打补丁这一步自带回滚** —— 脚本动手前先把被改的那个 core 文件另存一份 `<文件>.e4-access-log.orig`(**同名备份已存在时不覆盖**);要撤,就在上面那条命令后加 `--revert`(**手动**跑,详见下文「访问日志与核心补丁的总开关」)。⚠️ 撤法是"**删掉插进去的那几行**",不是把整份备份还原回去(备份只用来对拍:不一致时它会如实报 `⚠ 与备份不一致`)。**安装与升级本身既不先备份、也不会失败自动回滚**:插件只**读** profile 的 `package.json` 与 `cordis.patch.yml` 做自检(`tools/check-install.mjs`),**从不改写、也不备份**它们 —— 那两处改动是你手动做的,撤回也是手动(删掉那一行 + 撤依赖,见 `DESIGN.md` §10「回滚」)。想留后路,**动手前自己把这两个文件复制一份**。锚点漂移 / 歧义时脚本的行为是**一个字都不改**(安全失败),不是"改了再回滚"。
 
 > 发布名是 **`@nightpainters/dsh-ling`**,不是 `dsh-ling` —— npm 上 `dsh-ling` 这个名字已被他人占用。
 > 插件在配置里的注册 id 仍是 `dsh-ling`,两者不是一回事。
@@ -202,7 +206,7 @@ pnpm add file:<路径>/dsh-ling      # 或 npm install file:<路径>/dsh-ling
 #          name: '@nightpainters/dsh-ling'
 #    (id 保持 dsh-ling;name 用包名,Node 才解析得到代码)
 
-# 2) 给 DSH 核心打一行补丁(可取证访问日志要用;幂等/可回滚)
+# 2) 给 DSH 核心打一行补丁(可取证访问日志要用;幂等;这一页各步里**只有这一步**自带回滚)
 cd <路径>/dsh-ling
 node tools/apply-access-log-patch.mjs   # 只在 core 的 /api 栅栏处插一行可选调用
 #    不打也一切照常 —— 只是访问日志为空;但**会提醒**:侧栏挂常驻 ⚠(判据 installed===false 且 reason 为 patch-missing;只有**有意关掉** config.accessLog.enabled=false ⇒ reason 为 disabled-by-config 才不染红)
@@ -211,11 +215,13 @@ node tools/apply-access-log-patch.mjs   # 只在 core 的 /api 栅栏处插一�
 # 3) 重启宿主(host),然后浏览器 Ctrl+Shift+R 硬刷
 ```
 
+> 备份与回滚的确切范围见上文路径 A 之后那段(要点:**只有核心补丁这一步可回滚**;安装本身既无自动备份、也无自动回滚)。
+
 自检安装是否成功(**下面四个脚本不在 npm 包内**,只有源码路径能用:`tools/check-install.mjs` / `tools/check-publish.mjs` / `tools/clean-archived.mjs` / `tools/check-peers.mjs`;`tools/apply-access-log-patch.mjs` 则**在包内**,从 npm 装的人也能直接跑,见上面第 3 步):
 
 ```bash
 node tools/check-install.mjs          # 只读自检:入口是否直连仓库、patch 是否启用、数据目录是否就绪
-node tools/check-install.mjs --fix    # 若入口变成"复制副本"(DSH 升级/回退常见)则备份并重挂链接
+node tools/check-install.mjs --fix    # 若入口变成"复制副本"(DSH 升级/回退常见)则改名备份为 <入口>.bak-<时间戳> 后重挂链接;⚠️ 重挂若失败,备份留在原地但**不会自动改回**,按它打印的 mklink /J 手动修
 node tools/apply-access-log-patch.mjs --check   # 访问日志核心补丁是否在位(未打/锚点漂移时退出码 2)
 node tools/check-publish.mjs          # 上传/发布前跑一次:揪出记忆库、设置、密钥、绝对路径等不该公开的东西
 node tools/check-peers.mjs            # 声明与宿主对不上?退出码三态:0 合规 / 1 有不合规(宿主会把本插件丢进 skippedBundles,不激活)/ 2 无法判定(2 不算通过)
@@ -427,11 +433,12 @@ npm test        # 43 套:人格组装(含冻结门 · L1 选择)/ 归档清理(�
 
 | 文件 | 内容 |
 |---|---|
+| [`PHILOSOPHY.md`](./PHILOSOPHY.md) | **理念**:为什么值得做、凭什么这样做(目标循环 · 复盘与"人在循环" · 关系与边界 · 能力取舍) |
 | [`CHANGELOG.md`](./CHANGELOG.md) | 版本更新记录(最新一节即当前版本) |
 | [`DESIGN.md`](./DESIGN.md) | 架构与设计决策(三层记忆、冻结门、注入面、存储结构) |
 | [`ACCESS-DESIGN.md`](./ACCESS-DESIGN.md) | 历史接入蓝图:三条通道、会话契约格式、导入流水线 |
 
-> ⚠️ **从 npm 安装的人**:本包 `files` 白名单**不含 `images/`**(图只随 git 仓库公开) ⇒ 上表里前两份文档能正常打开;「界面」一节的**四张截图**引用的是仓库里的**绝对地址**,所以 npmjs.com 上**能正常显示**,但**包里没有图片文件**(离线环境读不到)。想看原图请到仓库:<https://github.com/NightPainters/DSH-Ling>。
+> ⚠️ **从 npm 安装的人**:本包 `files` 白名单**不含 `images/`**(图只随 git 仓库公开) ⇒ 上表里**四份文档**都随包发出(`PHILOSOPHY.md` · `CHANGELOG.md` · `DESIGN.md` · `ACCESS-DESIGN.md`),能正常打开;「界面」一节的**四张截图**引用的是仓库里的**绝对地址**,所以 npmjs.com 上**能正常显示**,但**包里没有图片文件**(离线环境读不到)。想看原图请到仓库:<https://github.com/NightPainters/DSH-Ling>。
 
 > 📄 **关于出处记录**:内部案卷、探针脚本与开发台账(`plans\`、`release\`、`_probe\`)属**作者本地开发物,不随本包公开**。正文或代码注释里若出现对它们的引用,那是**开发期的出处记录**,不是包内容。
 

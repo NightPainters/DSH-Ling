@@ -256,7 +256,12 @@ const w99text = editTool.output.render({}, w99)[0].text;
 check(w99.ok === true && Number(w99.weightScale) === 2, 'D-T03:回执回传库里的夹取值 2(改之前回 99)');
 check(Number(w99.weightRequested) === 99 && w99stored === 2, 'D-T03:请求值 99 与落库值 2 都能对上账');
 check(/设为 2/.test(w99text) && !/调到了 99/.test(w99text), 'D-T03:回执文案与库一致(不再说"调到了 99")');
-check(/不参与检索打分/.test(w99text), 'D-T03:回执写明该字段不参与打分(applied:false 不再只活在返回值里)');
+  // ⚠️ 2026-10-05(A-5)改判:此条原断言回执写「**不参与检索打分**」(那时 `applied:false`)。
+  //   主人当夜拍板走方案 (b) —— 枝系数**接回打分**(`raw × 血缘 × 矛盾 × 枝系数`)。
+  //   断言跟着换,但**判据没换**:D-T03 要求「回执与代码事实一致」—— 在此之前它靠「如实说没生效」
+  //   满足,现在靠「如实说生效、且说清不是禁用」满足。两边都不许出现「一边生效一边说没生效」。
+  check(/参与检索打分|改变召回排序/.test(w99text) && !/不参与检索打分/.test(w99text),
+    'D-T03:回执写明该字段**参与**打分(A-5 接回打分后与代码事实一致)');
 // D-T03 加强(本轮补):回执里的数字必须来自**库**,不是"我以为写了多少"。
 // `setBranchWeight` 的返回值是它自己算出来的夹取值(UPDATE 命中 0 行也回 ok)⇒ opBranchWeight
 // 现在写后读回 branch 表一次(`stored`),回执与留痕都以读回值为准。
@@ -433,6 +438,77 @@ check(specBad.length === 0,
   '判据表自身 0 命中(判据字面量必须用 `·` 断开,否则扫描器永久命中自己;实际:' + specBad.map((p) => p.id).join(',') + ')');
 check(REQUIRED.some((r) => r.file === 'PUBLISH-WORKFLOW.md' && r.id === 'C6-STORE'),
   '判据 5(不上架商店)在表里 —— 手册不在包内,由 release 侧运行器核');
+
+// 9) 1.6.2:recall 的**检索档过 handler** —— 这一条是真机抓回来的,不是设计出来的。
+//    事故:handler 写成 `guard(async (args) => …)` 而体内用 `sessionIdOf(exec)` ⇒ `exec` 是**未定义变量**
+//    ⇒ 严格模式抛 ReferenceError ⇒ 「按内容找会话」整条路直接失败。而当时 **44 套全绿** ——
+//    它们只测纯函数 `checkRecall`,**没有一个经过 handler**。这类错只有真机跑才现形,所以补在这里。
+//    同时端到端验"本会话排最后"这条链:exec → selfId → toSearchRows → 回执标注。
+{
+  const reg3 = [];
+  const seen = {};
+  const selfHit = {
+    header: { id: 'self-sess', cwd: 'E:\\DSH\\V1' },
+    bestMatch: { seq: 7, time: '2026-10-05 17:00:00', type: 'user/message', snippet: '我刚说的那句' },
+  };
+  const oldHit = {
+    header: { id: 'old-sess', cwd: 'E:\\DSH\\V1' },
+    bestMatch: { seq: 3, time: '2026-09-01 09:00:00', type: 'assistant/message', snippet: '很久以前的一段' },
+  };
+  const ctx3 = {
+    tools: { register: (spec) => { reg3.push(spec); return () => {}; } },
+    get: (name) => (name === 'sessionQuery' ? {
+      listSessions: async () => [selfHit, oldHit],
+      searchSessions: async (o) => {
+        seen.query = o?.query; seen.filters = o?.eventFilters; seen.limit = o?.limit;
+        return { items: [selfHit, oldHit] };   // 宿主把**本会话**排在头一条(这就是"搜什么都中今天")
+      },
+    } : null),
+  };
+  registerLingTools(ctx3, { gate: gate2, memory: memReal, settings });
+  const recTool = reg3.find((s) => s.name === TOOL_RECALL);
+  check(Boolean(recTool), 'recall 工具已注册到假 tools 服务');
+  // ⚠️ 2026-10-05 夜(A 方案):①档**默认走本地库**(毫秒级),所以这一节要测**宿主路**
+  //   就必须显式传 `hostSearch:true` —— 不加它,`searchSessions` 根本不会被调用(实测 4 条断言当场变红)。
+  //   本地路另有一组断言,见下面 9b。
+  const rr = await recTool.execute({ q: '记忆树', hostSearch: true }, { agent: { sessionId: 'self-sess' } });
+  check(rr.ok === true, '★ 检索档过 handler **不抛**(exec 被接住)—— 实际:' + JSON.stringify(rr).slice(0, 140));
+  check(seen.query === '记忆树', 'query 原样传给宿主检索');
+  check(Array.isArray(seen.filters) && seen.filters.length === 2, '两条件 eventFilters 照旧(只要对话事件 + 当前 surface)');
+  const txt = recTool.output.render({}, rr)[0].text;
+  check(txt.includes('← 本会话'), '★ 本会话命中被标注(端到端:exec → selfId → 回执)');
+  const iSelf = txt.indexOf('self-sess');
+  const iOld = txt.indexOf('old-sess');
+  check(iOld >= 0 && iSelf >= 0 && iOld < iSelf,
+    '★ 历史命中排在本会话之前(宿主给的"刚说的话"不再占头部)');
+  // 无 exec ⇒ 不许抛(旧调用点/别的宿主版本形状不同也得活)
+  const rr2 = await recTool.execute({ q: '记忆树', hostSearch: true }, undefined);
+  check(rr2.ok === true, '不给 exec 也不抛(selfId 退化为空 ⇒ 顺序与标注都不动)');
+
+  // ── 9b) A 方案:①档**默认走本地库**,一次都不碰宿主 ——————————————————————
+  //   依据(2026-10-05 夜实测):同一个查询本地 **2~45 毫秒**,宿主**每次 >20 秒**。
+  //   这里的判据分两条:① 行为(local:true 且**宿主方法零调用**);② 回执**如实标注**来源
+  //   (库内那份是残的,不说清就会被读成"库里只有这些")。
+  const reg4 = [];
+  let hostCalled = 0;
+  const ctx4 = {
+    tools: { register: (spec) => { reg4.push(spec); return () => {}; } },
+    get: (name) => (name === 'sessionQuery' ? {
+      listSessions: async () => [],
+      searchSessions: async () => { hostCalled += 1; return { items: [] }; },
+    } : null),
+  };
+  registerLingTools(ctx4, { gate: gate2, memory: memReal, settings });
+  const rec4 = reg4.find((s) => s.name === TOOL_RECALL);
+  const loc = await rec4.execute({ q: '记忆树' }, { agent: { sessionId: 'self-sess' } });
+  check(loc.ok === true && loc.local === true, '★ A方案:①档默认走本地库(local:true)—— 实际:' + JSON.stringify({ ok: loc.ok, local: loc.local }).slice(0, 90));
+  check(hostCalled === 0, '★ A方案:本地路**一次都不调用**宿主的 searchSessions');
+  const locTxt = rec4.output.render({}, loc)[0].text;
+  check(/本机库内原文层/.test(locTxt), '★ A方案:回执如实标注原文来源是"本机库内原文层"(残的那份要说清)');
+  check(!/宿主检索超过/.test(locTxt), 'A方案:本地路不会出现"宿主超时"的文案');
+  const locH = await rec4.execute({ q: '记忆树', hostSearch: true }, { agent: { sessionId: 'self-sess' } });
+  check(hostCalled === 1 && locH.local !== true, '★ 显式 hostSearch:true 才走宿主(且只走一次)');
+}
 
 console.log(ok ? '会话内工具 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

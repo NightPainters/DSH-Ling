@@ -231,6 +231,27 @@ test('修复一:与 deepsummary/数据目录**同源** —— defaultSessionsRoo
   assert.equal(dshHomeNow(), realDshHomeEnv === undefined ? undefined : realDshHomeEnv, '跑完必须还原 DSH_HOME');
 });
 
+// ── 修复一之二(2026-10-05 · A-4):「同一语义两个来源」的**最后一处** ─────────────────
+// 事实(**原文说的是修复前** —— 该处已于 2026-10-05 由 A-4 修好,本注释同步):
+// `rawlog.js` 的 `sessionsRoot()` 曾写着 `join(os.homedir(), '.dsh', 'sessions')` —— 绕过 DSH_HOME。
+// 这是全仓最后一处这么写的地方(另两处在 2026-09-29 已统一),症状与上面逐字相同:
+// 不设 DSH_HOME 时两者等价 ⇒ **缺陷因此长期隐身**;一旦设了(导入测试台就是靠它做隔离,
+// `DESIGN-导入测试台.md:25` 明写"DSH_HOME 层面隔离才有效"),这里就会去读**真机**会话目录。
+// 命门还更重一层:`sessionsRoot()` 是 `recall` ①②档与 `dialogTurns` 的入口 ⇒ 隔离失效时
+// 读档会把真机会话当成本地素材,而"读档"是纯只读 —— 不会有任何报错提示你走错了路。
+test('修复一之二(A-4):sessionsRoot() 必须跟随 DSH_HOME,且与 defaultSessionsRoot() 同源', async () => {
+  const { sessionsRoot } = await imp('lib/host/rawlog.js');
+  const h = join(tmp, 'dsh-home-rawlog');
+  assert.equal(await inDshHome(h, () => sessionsRoot()), join(h, 'sessions'), 'DSH_HOME 优先');
+  assert.notEqual(await inDshHome(h, () => sessionsRoot()), join(homedir(), '.dsh', 'sessions'),
+    '设了 DSH_HOME 就绝不能再去 homedir()/.dsh(缺陷本体)');
+  assert.equal(await inDshHome(h, () => sessionsRoot()), await inDshHome(h, () => defaultSessionsRoot()),
+    '与扫描侧同源(两条路必须是同一个来源)');
+  assert.equal(await inDshHome(null, () => sessionsRoot()), join(await inDshHome(null, () => dshHome()), 'sessions'),
+    'DSH_HOME 未设时退化为 ~/.dsh/sessions');
+  assert.equal(dshHomeNow(), realDshHomeEnv === undefined ? undefined : realDshHomeEnv, '跑完必须还原 DSH_HOME');
+});
+
 test('修复一(不传 root):DSH_HOME 与假 home 同时在场 ⇒ 扫描以 DSH_HOME 为准', { skip: skipIfNotHonored }, async () => {
   const h = join(tmp, 'dsh-home-wins');
   mkdirSync(join(h, 'sessions', 'ws-a', 'sid-1'), { recursive: true });
