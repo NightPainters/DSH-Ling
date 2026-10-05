@@ -18,19 +18,19 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
 const turn = (sid, seq, role, text) => db.appendRawTurn(sid, { seq, role, ts: `2026-09-17T10:00:0${seq}Z`, model: null, text });
 
 // ---- 1) 剥称呼/问候前缀 ----
-check(stripPreamble('晚上好器灵，我小加班了一会，回来了') === '我小加班了一会，回来了', '剥「晚上好器灵，」: ' + stripPreamble('晚上好器灵，我小加班了一会，回来了'));
-check(stripPreamble('器灵，接下来在这里继续开发') === '接下来在这里继续开发', '剥「器灵，」');
-check(stripPreamble('哈喽器灵~ 今天做什么') === '今天做什么', '剥「哈喽器灵~ 」');
+check(stripPreamble('晚上好小鱼，我小加班了一会，回来了') === '我小加班了一会，回来了', '剥「晚上好小鱼，」: ' + stripPreamble('晚上好小鱼，我小加班了一会，回来了'));
+check(stripPreamble('鱼姬，接下来在这里继续开发') === '接下来在这里继续开发', '剥「鱼姬，」');
+check(stripPreamble('哈喽小鱼鱼~ 今天做什么') === '今天做什么', '剥「哈喽小鱼鱼~ 」');
 
 // ---- 2) 无信息量首句判定 ----
 check(isVagueTitle('你好') === true, '「你好」= 无信息量');
 check(isVagueTitle('下午好') === true, '「下午好」= 无信息量');
-check(isVagueTitle('已测试对话') === true, '「已测试对话」= 无信息量');
+check(isVagueTitle('已测试聊天') === true, '「已测试聊天」= 无信息量');
 check(isVagueTitle('UI测试，回复数字2') === true, '「UI测试…」= 无信息量');
 check(isVagueTitle('现在你有计算器插件吗？没有的话挑一个装上') === false, '实质问句 ≠ 无信息量');
 
 // ---- 3) 句读处收尾,不切半句(旧行为 46 字硬截) ----
-const LONG = '器灵，接下来在这里继续开发生长型人格与记忆树模块，继续走你的新生之路。我刚刚对1.2.1的代码做了审计，发现问题';
+const LONG = '鱼姬，接下来在这里继续开发生长型人格与记忆树模块，继续走你的新生之路。我刚刚对1.2.1的代码做了审计，发现问题';
 const t = heuristicTitle(LONG);
 check(t === '接下来在这里继续开发生长型人格与记忆树模块，继续走你的新生之路', '在「。」处收尾: ' + t);
 check(t.length <= TITLE_MAX_CHARS, '不超上限: ' + t.length);

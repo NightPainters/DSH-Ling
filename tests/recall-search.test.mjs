@@ -55,15 +55,15 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     { header: { id: 'sub-1', origin: 'subagent' }, bestMatch: { type: 'assistant/message', seq: 7, time: 1759000000000, snippet: '子代理的话' } },
   ];
   const visible = visibleIdSet(hits);
-  const r = toSearchRows(hits, { visible, callName: '用户' });
+  const r = toSearchRows(hits, { visible, callName: '尝生' });
   check(r.rows.length === 1, '默认范围应只剩 1 条,实得 ' + r.rows.length);
   check(r.skipped === 1, '被挡掉的必须计数(skipped=1),实得 ' + r.skipped);
-  check(r.rows[0].who === '用户', 'user/message 应显示称呼');
+  check(r.rows[0].who === '尝生', 'user/message 应显示称呼');
   check(!/\n/.test(r.rows[0].snippet), '摘要必须单行化');
   check(r.rows[0].seq === 113 && r.rows[0].time.length > 0, '序与时间应带出');
   const all = toSearchRows(hits, { all: true });
   check(all.rows.length === 2 && all.skipped === 0, 'all=true 应全放行');
-  check(all.rows[1].who === '器灵', 'assistant/message 显示器灵');
+  check(all.rows[1].who === '鱼姬', 'assistant/message 显示鱼姬');
   check(toSearchRows(null, {}).rows.length === 0, 'null hits 不抛');
 }
 
@@ -71,7 +71,7 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
 {
   const good = renderSearch({
     ok: true, q: '记忆树 血缘', all: false, skipped: 2, hasMore: true,
-    rows: [{ conv: 'session-x', seq: 113, time: '10-04 19:33', who: '用户', snippet: '先等等' }],
+    rows: [{ conv: 'session-x', seq: 113, time: '10-04 19:33', who: '尝生', snippet: '先等等' }],
   });
   check(typeof good === 'string' && good.includes('记忆树 血缘'), '正常回执应含查询词');
   check(good.includes('主人自己的会话'), '默认范围要在回执里说明');
@@ -118,8 +118,8 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     superseded_by TEXT DEFAULT '', origin TEXT DEFAULT 'auto', branch_id TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT '')`);
   const ins = db.prepare('INSERT INTO deep_item (id,kind,text,conv_id,seq_from,seq_to,src,superseded_by,hit_count,pinned,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-  ins.run('di:1', '承诺', '器灵汇报必须基于自己实测的凭据', 'conv-a', 10, 12, 'dsh', '', 0, 0, '2026-10-04 01:00:00');
-  ins.run('di:2', '偏好', '用户的原则：不投资股市、不盯盘', 'conv-b', 3, 3, 'dsh', '', 0, 0, '2026-10-04 02:00:00');
+  ins.run('di:1', '承诺', '鱼姬汇报必须基于自己实测的凭据', 'conv-a', 10, 12, 'dsh', '', 0, 0, '2026-10-04 01:00:00');
+  ins.run('di:2', '偏好', '尝生的原则：不投资股市、不盯盘', 'conv-b', 3, 3, 'dsh', '', 0, 0, '2026-10-04 02:00:00');
   ins.run('di:3', '决定', '记忆树血缘可溯', 'conv-a', 20, 20, 'dsweb', '', 0, 0, '2026-10-04 03:00:00');
   ins.run('di:4', '事实', '这条已被取代', 'conv-c', 1, 1, 'dsh', 'di:9', 0, 0, '2026-10-04 04:00:00');
   const mem = { db };
@@ -137,7 +137,7 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   // 渲染:条目段必须出现、且两种命中能同屏
   const onlyDeep = renderSearch({
     ok: true, q: '凭据', all: false, skipped: 0, rows: [],
-    deep: [{ kind: '承诺', text: '器灵汇报必须基于实测凭据', conv_id: 'conv-a', seq_from: 10, seq_to: 12, pinned: 0 }],
+    deep: [{ kind: '承诺', text: '鱼姬汇报必须基于实测凭据', conv_id: 'conv-a', seq_from: 10, seq_to: 12, pinned: 0 }],
   });
   check(onlyDeep.includes('深层库条目'), '有条目时要出现条目段');
   check(onlyDeep.includes('[承诺]'), '条目要带 kind');
@@ -154,10 +154,10 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   check(!onlyDeep.includes('${'), '条目回执不许有未插值');
   check(renderSearch({
     ok: true, q: 'x', all: false, deep: [{ kind: '偏好', text: '一句话', conv_id: 'c' }],
-    rows: [{ conv: 'c2', seq: 1, time: '10-04 20:08', who: '用户', snippet: 's' }],
+    rows: [{ conv: 'c2', seq: 1, time: '10-04 20:08', who: '尝生', snippet: 's' }],
   }).includes('会话原文层'), '条目会话双命中时两段都在');
   check(renderSearch({
-    ok: true, q: 'x', all: false, deep: [], rows: [{ conv: 'c2', seq: 1, time: 't', who: '用户', snippet: 's' }],
+    ok: true, q: 'x', all: false, deep: [], rows: [{ conv: 'c2', seq: 1, time: 't', who: '尝生', snippet: 's' }],
   }).includes('找到 1 个会话'), '无条目时保持旧口径(不破坏既有回执)');
   check(renderSearch({ ok: true, q: 'x', all: false, deep: [], rows: [], skipped: 0 }).includes('没找到'), '都没命中时仍要明确说法');
   check(SEARCH_DEEP_MAX > 0 && SEARCH_DEEP_MAX <= 50, 'SEARCH_DEEP_MAX 在合理区间');

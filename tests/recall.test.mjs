@@ -131,7 +131,7 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     const txt = RECALL_SPEC.output.render(null, {
       ok: true, action: 'outline', conv: s.conv, project: s.project, frames: r.frames, bytes: r.bytes,
       totalTurns: d.turns.length, injected: d.injected, assistantEmpty: d.assistantEmpty,
-      outline, callName: '用户',
+      outline, callName: '尝生',
     })[0].text;
     check(txt.includes(s.conv), '目录回执应含会话 id');
     // ⚠️ 判据**不能写死 `#1`**(2026-10-04 修):`listSessionFiles()[0]` 是**此刻最新**的会话,
@@ -144,7 +144,7 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     check(RECALL_SPEC.output.render(null, {
       ok: true, action: 'read', conv: s.conv, project: s.project, frames: r.frames, bytes: r.bytes,
       totalTurns: d.turns.length, injected: 0, assistantEmpty: 0, remaining: 3, nextFrom: 9,
-      turns: [{ n: 1, time: '01-01 00:00', role: 'user', human: true, text: '甲' }], callName: '用户',
+      turns: [{ n: 1, time: '01-01 00:00', role: 'user', human: true, text: '甲' }], callName: '尝生',
     })[0].text.includes('还有 3 轮没给'), '正文档溢出必须明说还剩几轮');
   } else {
     console.log('· 跳过真机断言(本机没有可读的会话目录)');

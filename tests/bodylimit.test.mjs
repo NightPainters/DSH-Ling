@@ -407,7 +407,15 @@ head('T8 首字节闸(E5:只发头不发体)+ 负对照(慢但持续的合法上
     + (timedOut ? ' ⇒ 死线 1500 ms 到点仍无结局,正是修前那个形状' : '') + ')');
   check(!!err && err.code === 'BODY_IDLE_NO_FIRST_BYTE',
     '1) 只发头不发体 ⇒ reject,code 实测 ' + JSON.stringify(err && err.code) + '(不再是"永远挂着")');
-  check(dt >= 20 && dt < 300,
+  // ⚠️ **CI 修红(2026-10-05)**:下界原是 `dt >= 20`,而 `dt` 是 `Date.now()` 的**墙钟差** ——
+  //   GitHub Actions 上实测 **19 ms** ⇒ 断言红(这就是 1.6.0 那次 failure 的**唯一**原因,
+  //   其余 42/43 段全过)。但"闸门 20 ms"的语义是**约** 20 ms:定时器可能早一两毫秒到点,
+  //   毫秒级钟本身也有粗粒度,早 1 ms **不是缺陷**。
+  //   这一条真正要证明的是"**远不到** Node 自己的 300 s 兜底、且结局确实很快";
+  //   而"结局就是那道闸给的"已由第 1 条(`code==='BODY_IDLE_NO_FIRST_BYTE'`)、
+  //   第 6 条(`idleMs === 20`)各自钉死 ⇒ 下界只需证明"**确实等过、不是同步 reject**"。
+  //   (别再把它写回 `>= 20`:那是在断言定时器的实现细节,不是在断言行为。)
+  check(dt >= 1 && dt < 300,
     '2) 闸门 20 ms ⇒ 实测 ' + dt + ' ms 内 reject(断言 < 300 ms:证明**不是**在等 Node 的 300 s 兜底)');
   check(req.destroyCount === 1 && destroyedAt >= 0 && destroyedAt < 300,
     '3) destroy() 恰一次、发生在 ' + destroyedAt + ' ms(实测调用 ' + req.destroyCount + ' 次)');

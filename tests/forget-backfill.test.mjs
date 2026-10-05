@@ -281,7 +281,7 @@ check(withSummary.empty === false, '有正文的概述 ⇒ 不算 empty(归档�
   const forgot = await handlers[TOOL_MEMORY_FORGET]({ action: 'forget', source: 'dsh', convId: 'tool-sess-1', reason: '工具链路:先忘掉' });
   check(forgot.ok === true && forgot.action === 'forget' && forgot.turns === 2, '工具通道遗忘成功且回报归档轮数:' + JSON.stringify({ turns: forgot.turns }));
   check(mem2.rawTurnCount('tool-sess-1') === 2 && mem2.overviewById('dsh', 'tool-sess-1'), '工具通道遗忘后行仍在库里(软标记)');
-  check(mem2.listForgotten().length === 1 && mem2.listForgotten()[0].actor === 'ling', '遗忘记在"器灵"名下(actor=ling)');
+  check(mem2.listForgotten().length === 1 && mem2.listForgotten()[0].actor === 'ling', '遗忘记在"鱼姬"名下(actor=ling)');
   const log = mem2.db.prepare("SELECT * FROM branch_log WHERE action='forget'").all();
   check(log.length === 1 && /归档 2 轮/.test(log[0].note), 'branch_log 留痕写明归档了几轮');
 

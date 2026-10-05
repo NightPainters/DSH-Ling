@@ -193,8 +193,8 @@ const ids = (r) => r.items.map((i) => i.id);
   check(sec.split('以下是我从与主人').length === 2, '视角框只出现一次');
   check(sec.includes('- [关系] 两人约定先侦察再动手'), '条目原样进段');
   // 称呼跟随 userTitle(与时钟锚同一把尺:work=正式名 / life=昵称)
-  check(formatL1Section(r, { userTitle: '用户/主人', mode: 'work' }).includes('以下是我从与用户'), 'work 取正式名');
-  check(formatL1Section(r, { userTitle: '用户/主人', mode: 'life' }).includes('以下是我从与主人'), 'life 取昵称');
+  check(formatL1Section(r, { userTitle: '尝生/主人', mode: 'work' }).includes('以下是我从与尝生'), 'work 取正式名');
+  check(formatL1Section(r, { userTitle: '尝生/主人', mode: 'life' }).includes('以下是我从与主人'), 'life 取昵称');
   check(perspectiveFrame('', 'work').includes('与主人'), '空 userTitle 退回中性措辞');
   // 超量折叠
   const big = pick(Array.from({ length: 20 }, (_, i) => item({ id: 'z' + i, text: '条目' + i })), { maxItems: 3 });
@@ -221,7 +221,7 @@ const ids = (r) => r.items.map((i) => i.id);
   check(r.items.length < 40, '确实被预算裁过: 入选 ' + r.items.length);
 }
 
-// 11) **同源限额**(2026-10-04 用户开新会话实测:「会话内的、临时的结论会被灌入」)
+// 11) **同源限额**(2026-10-04 尝生开新会话实测:「会话内的、临时的结论会被灌入」)
 //   病灶:一次高产出会话(实测某次生图会话 13 条)能把 8 条开场整个占满,而那 8 条讲的是同一件事。
 //   规则:同一次会话最多进 2 条（`MAX_PER_CONV`）;**置顶不受此限**(那是主人的明确动作)。
 {
@@ -266,7 +266,7 @@ const ids = (r) => r.items.map((i) => i.id);
   check(r.runnerUps.filter((x) => x.reason === 'dup').length === 1, '被去重挡下的进了 runnerUps(dup)');
 }
 
-// 13) **事实席位**(1.6,2026-10-04 用户:「8 条也可以考虑改 10 条,其中 2 条作为**最硬的事实**的席位」)
+// 13) **事实席位**(1.6,2026-10-04 尝生:「8 条也可以考虑改 10 条,其中 2 条作为**最硬的事实**的席位」)
 //   动机是实测偏斜:承诺/关系优先后,`事实` 的类别分为 0 ⇒ 稳定的环境类事实永远进不来,
 //   而它们恰恰是"接下来要干什么"的前提。留 2 席给 `durable` 的事实,不挤占"关于人"的那 8 席。
 {

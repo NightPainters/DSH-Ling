@@ -75,7 +75,7 @@ const control = String.fromCharCode(1) + String.fromCharCode(0x1f) + String.from
 const t1cases = [
   ['空串', ''],
   ['纯 ASCII', 'abc123'],
-  ['CJK 5 字', '器灵记忆树'],
+  ['CJK 5 字', '鱼姬记忆树'],
   ['emoji 代理对', '🐟🐠'],
   ['双引号+反斜杠', '"' + '\\'],
   ['控制字符 0x01/0x1f/0x7f', control],
@@ -91,7 +91,7 @@ for (const [name, s] of t1cases) {
   console.log(`    ${name}: utf8Len=${got} · Buffer.byteLength=${want} · s.length=${raw}${got === raw ? '' : ' ·(≠length ✓)'}`);
 }
 eq(t1bad, 0, 'T1 utf8Len 与 Buffer.byteLength 逐例一致');
-ok(T.utf8Len('器灵记忆树') === 15 && T.utf8Len('器灵记忆树') !== '器灵记忆树'.length, 'T1 CJK 计 3 字节/字(未用 s.length 冒充)');
+ok(T.utf8Len('鱼姬记忆树') === 15 && T.utf8Len('鱼姬记忆树') !== '鱼姬记忆树'.length, 'T1 CJK 计 3 字节/字(未用 s.length 冒充)');
 ok(T.utf8Len('🐟') === 4, 'T1 单个 emoji 计 4 字节(代理对合成)');
 ok(T.utf8Len('') === 0, 'T1 空串 = 0');
 
