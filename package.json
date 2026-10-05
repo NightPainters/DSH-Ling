@@ -1,7 +1,7 @@
 {
   "name": "@nightpainters/dsh-ling",
   "version": "1.6.2",
-  "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:三层记忆、从历史里长出来的人格档案、定型锁与自由生长",
+  "description": "器灵 · 跑在你自己电脑上的记忆与人格助手插件:以「人在循环」的双向复盘为核心回路,人格由共同记忆长出并有定型锁,记忆树可归并、可回溯、每次改动都留痕",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
