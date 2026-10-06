@@ -312,5 +312,41 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   db.close();
 }
 
+// ── 10) 检索面:类目名(kind)也在扫描范围内(2026-10-06)─────────────────────────
+//   与 l1lines 第 14 组同源:两个入口(开场选料 / 按内容检索)都曾经只扫正文 ⇒
+//   查询里的类目词打不中它们自己的条目(实测搜「纪律」只回来 2/18 条)。
+{
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE deep_item (
+    id TEXT, kind TEXT, text TEXT, conv_id TEXT, src TEXT,
+    seq_from INTEGER DEFAULT 0, seq_to INTEGER DEFAULT 0,
+    pinned INTEGER DEFAULT 0, hit_count INTEGER DEFAULT 0,
+    superseded_by TEXT DEFAULT '', created_at TEXT, at TEXT)`);
+  const ins = db.prepare('INSERT INTO deep_item (id,kind,text,conv_id,src,created_at,at) VALUES (?,?,?,?,?,?,?)');
+  ins.run('d1', '纪律', '正文里没有那个类目词', 'c1', 'vein', '2026-10-06', '2026-10-06');
+  ins.run('d2', '事实', '正文里没有那个类目词', 'c1', 'vein', '2026-10-06', '2026-10-06');
+  const mem = { db };
+  check(searchDeepItems(mem, '纪律', 10).length === 1, '★ 检索面能按**类目名**命中(纪律)');
+  check(searchDeepItems(mem, '事实', 10).length === 1, '★ 同族:按「事实」命中事实类');
+  check(searchDeepItems(mem, '纪律 事实', 10).length === 0, '★ 多词仍是 AND(两类互斥 ⇒ 0 条)');
+  check(searchDeepItems(mem, '正文里', 10).length === 2, '正文关键词照旧命中(没被 kind 改动挤掉)');
+  db.close();
+}
+
+// ── 11) 本地路的**范围**必须如实说(2026-10-06 · 外部文档核对抓到)────────────────────
+//   本地路直查 `dsh_turns_raw` —— 那是**全量**(实测 11,296 行 / 1,647 会话,含 `source='dsweb'`
+//   的 **1,523 个网页端导入会话** + 未标来源的 104 个)⇒ 它**不过可见集**。
+//   而它曾硬写 `degraded:false` ⇒ 回执照旧印「已在主人自己的会话内(默认范围)」= **说假话**。
+{
+  const loc = renderSearch({
+    ok: true, q: 'x', all: false, local: true, localScope: true, deep: [], rows: [], skipped: 0,
+  });
+  check(/本机库全量/.test(loc), '★ 本地路要如实说范围(不过可见集)');
+  check(!/已在「\*\*主人自己的会话\*\*」内/.test(loc), '★ 本地路**不许**谎称"已在主人自己的会话内"');
+  const host = renderSearch({ ok: true, q: 'x', all: false, deep: [], rows: [], skipped: 0 });
+  check(/已在「\*\*主人自己的会话\*\*」内/.test(host), '宿主路(无 localScope)照旧印"已在主人自己的会话内"(没被误伤)');
+}
+
 console.log(ok ? '✓ recall-search 全部通过' : '✗ recall-search 有失败项');
 process.exit(ok ? 0 : 1);

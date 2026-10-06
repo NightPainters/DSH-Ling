@@ -329,9 +329,44 @@ const ids = (r) => r.items.map((i) => i.id);
   const whyFlat = String(flat.items[0].why || '');
   check(!/枝系数/.test(whyFlat), 'A-5 系数为 1 时留痕**不印**枝系数(与接线前逐字相同)');
 
+  // ⚠️ 2026-10-06(**外部文档核对抓到**):枝系数 `0` 的真实语义是**出局,不是"排到最后"** ——
+  //   它乘进分数后 `score = 0`,而 `l1.js` 的 `score > 0` 判据把非置顶的零分项归进 `excluded.zero`
+  //   直接排除。而回执 note 与三份文档曾宣传"`0` = 排到最后(不是禁用)" = **亲口撒谎**。
+  //   这条断言钉住**事实**,免得将来有人照着那句宣传把行为"改回去"。
+  const r0 = selectL1(mkStore(rows, {
+    scales: { 'br:jia': 0 },
+    convBranch: { 'dsweb|cA': 'br:jia', 'dsweb|cB': 'br:yi' },
+  }), opt);
+  check(ids(r0).join(',') === 'di:b',
+    '★A-5 枝系数 0 ⇒ 该枝结论**整条出局**(不是"排到最后")—— 实际:' + ids(r0).join(','));
+  check(r0.excluded.zero >= 1,
+    '★A-5 出局被记进 excluded.zero(不是静默消失)—— 实际:' + r0.excluded.zero);
+
   // 零开销路径:枝系数全 1 ⇒ 连映射都不建(桩里没有那两个方法也不该抛)
   const r3 = selectL1({ listDeepItems: () => rows }, opt);
   check(r3.items.length === 2, 'A-5 零开销路径:没有枝映射方法也不抛、照常选(实际 ' + r3.items.length + ')');
+}
+
+// ── 14) 类目名(kind)参与关键词命中(2026-10-06)───────────────────────────────────
+//   为什么单列:纪律 18 条入库后**搜「纪律」搜不出它们自己** —— 关键词只匹配正文(`row.text`),
+//   而"这是哪一类"写在 kind 列里。同族缺陷对 承诺 / 决定 / 关系 / 事实 / 偏好 一样成立
+//   ⇒ 一次钉死,免得下次再靠人眼发现。
+{
+  const mk = (id, kind, text) => ({
+    id, kind, text, conv_id: 'c-' + id, src: 'dsh', durability: 'long',
+    pinned: 0, hit_count: 0, at: '2026-01-01', seq_from: 0, seq_to: 0, superseded_by: '',
+  });
+  const two = [
+    mk('k1', '纪律', '甲:这条正文里不出现类目词'),
+    mk('k2', '事实', '乙:这条正文里同样不出现类目词'),
+  ];
+  const o14 = { maxItems: 10, budgetChars: 1008 };
+  const rD = selectL1({ listDeepItems: () => two }, { ...o14, keywords: ['纪律'] });
+  check(rD.items.some((x) => x.id === 'k1'), '★ 关键词命中**类目名**也能召回该条目(纪律)—— 实际:' + JSON.stringify(rD.items.map((x) => x.id)));
+  const rF = selectL1({ listDeepItems: () => two }, { ...o14, keywords: ['事实'] });
+  check(rF.items.some((x) => x.id === 'k2'), '★ 同族:命中「事实」也能召回事实类');
+  const rN = selectL1({ listDeepItems: () => two }, { ...o14, keywords: ['不存在词'] });
+  check(rN.items.length === 2, '无关词不受影响(两条仍按权重入选,实际 ' + rN.items.length + ')');
 }
 
 console.log(ok ? 'L1 换料(深层库条目) 全部通过 ✓' : '存在失败 ✗');
