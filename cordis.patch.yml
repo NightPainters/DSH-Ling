@@ -7,10 +7,40 @@
 #        不符时客户端判定"该 row 没到货",会回退去取单资源 URL 把同一份字节**再执行一遍**,
 #        第二次注册抛 `duplicate factory registration` ⇒ 前端整片黑屏(2026-09-26 实测两次)。
 #        ⇒ 改包名时 `lib/client.js` 必须同批改;`tests/unit.mjs` 已加断言守着。
-#        HMR live 热载后浏览器硬刷即可看到 client 模块。
+#        工作区改动不等于当前 GUI 已更新;部署并重建实际使用的客户端产物后再刷新验证。
 - insert:
     - id: dsh-ling
       name: '@nightpainters/dsh-ling'
       # config(可选,覆盖默认值):
       #   dataDir: 覆盖数据目录(默认 $DSH_HOME/cache/dsh-ling)
-      #   injectEnabled: false  # 完全关闭系统提示注入(逃生开关)
+      #   injectEnabled: false  # 关掉**记忆段**注入(逃生开关;人格段另受 settings.persona.enabled 管)
+      #   library:
+      #     enabled: true       # 独立 library.db;不迁移既有记忆,不参与开场注入
+      #     codeRoots: []       # 管理员登记的已存在绝对目录;默认不允许任何本地源
+      #     officialUrls: []    # 管理员登记的精确 HTTPS 文档 URL;默认不允许任何远程源
+      #     limits:             # 只接受这些规范键;非法配置在开库前拒绝
+      #       itemMaxBytes: 65536
+      #       resultMaxBytes: 262144
+      #       queryMaxChars: 512
+      #       searchDefaultLimit: 20
+      #       searchMaxLimit: 100
+      #       sourceMaxBytes: 2097152
+      #       selectedTextMaxBytes: 16384
+      #       selectedTextMaxLines: 200
+      #       checkTimeoutMs: 10000
+      #       checkConcurrency: 2
+      #       sqliteBusyTimeoutMs: 2000
+
+      # 后台自动行为(默认全开)的 5 个键 —— **在哪改**:
+      #   · **首选**:`settings.json`($DSH_HOME/cache/dsh-ling/settings.json)的 `auto.*` 子树
+      #     —— 面板开关写的就是它;该文件只存你改过的部分;
+      #   · **兜底一层**:下面这几个旧键(插件配置,仍生效;`auto.*` 命中时以 `auto.*` 为准);
+      #   · 两处都没有 ⇒ 代码默认值(lib/host/deepsummary.js 的 DEEP_CFG)。
+      #   auto.deepSummary       默认 true      —— 启动自检通过后挂定时器;false = 只有手动点「深摘」才调用模型
+      #   auto.deepIntervalMin   默认 30(最小 10)—— 每隔多久跑一轮自动深摘
+      #   auto.deepMaxPerRun     默认 2(1–20)  —— 每轮最多挑几个会话
+      #   auto.bootProbeDelayMs  默认 12000     —— 启动 12 秒后做一次 LLM 自检探针(通过了才挂定时器);0 = 立即试探
+      #   auto.feedbackAuto      默认 true      —— 事件驱动(宿主推 feedback/committed 时);false = 完全不接反馈成长回路
+      #   旧键(写在本段 config 里的形态,不是上面的 auto.*):feedbackAuto / deepSummaryAuto / deepIntervalMin / deepMaxPerRun
+      #   生效时机:deepSummary / bootProbeDelayMs / feedbackAuto 启动期读取 ⇒ 改完要重启插件;
+      #             deepIntervalMin / deepMaxPerRun 对已挂上的定时器不回溯(下一轮启动后按新值走)。

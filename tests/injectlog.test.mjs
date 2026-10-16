@@ -4,7 +4,7 @@
 //   本套钉四件事:① 表与读写往返 ② **只有首次定稿**落痕(重建/刷新不落) ③ 落选者名单与理由可读 ④ 打桩不炸。
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -188,6 +188,74 @@ section('4) 理由词表');
   const flat = explainScore({ lineage: 1, kw: 0, rich: 0, conf: 1, score: 0.5 });
   check(!flat.includes('关键词') && !flat.includes('矛盾') && !flat.includes('摘要'),
     'E5:没生效的项不写进理由(否则留痕会说谎),实际 ' + flat);
+}
+
+// ---------------- 5) F5:injectEnabled=false 必须真的关掉(逃生开关不许是空操作) ----------------
+//  病灶(1.7 修复批次 F5,红 1 的 6 条之一):`cordis.patch.yml:16` 承诺「完全关闭系统提示注入」,
+//  而全仓 `cfg.injectEnabled` **零处读** —— 用户以为关掉了,其实照注。真闸此前只有
+//  `settings.persona.enabled`(persona.js:166)。本节的判据是**行为**:关到底时**一段都不注册**;
+//  同时钉一条**正对照** —— 默认行为必须逐字不变(防"顺手把默认关掉"这种更大的事故)。
+section('5) F5:injectEnabled=false ⇒ 记忆段一段都不注册');
+{
+  const { registerMemorySection, SECTION_NAME, CLOCK_CONTEXT_NAME } = await imp('lib/host/inject.js');
+  const mkCtx = () => {
+    const calls = { section: [], context: [] };
+    const sp = {
+      section: (o) => { calls.section.push(o.name); return () => {}; },
+      context: (o) => { calls.context.push(o.name); return () => {}; },
+    };
+    return { calls, ctx: { get: (n) => (n === 'systemPrompt' ? sp : undefined) } };
+  };
+  const memStub = () => {
+    const kv = new Map();
+    return { kvGet: (k) => (kv.has(k) ? kv.get(k) : ''), kvSet: (k, v) => { kv.set(k, String(v)); }, _kv: kv };
+  };
+  const gate = { snapshotOf: () => null };
+
+  // ① 关到底:section 与 context **都不注册**
+  const off = mkCtx();
+  const memOff = memStub();
+  const disposeOff = registerMemorySection(off.ctx, gate, memOff, { get: () => S }, { enabled: false });
+  eq(off.calls.section.length, 0, 'F5:enabled=false ⇒ 记忆段不注册(实际 ' + JSON.stringify(off.calls.section) + ')');
+  eq(off.calls.context.length, 0, 'F5:enabled=false ⇒ 时间锚 context 不注册(实际 ' + JSON.stringify(off.calls.context) + ')');
+  eq(typeof disposeOff, 'function', 'F5:关闭时仍返回一个可调用的 dispose(卸载路径不该拿到 undefined)');
+  let disposeThrew = null;
+  try { disposeOff(); } catch (e) { disposeThrew = e; }
+  check(disposeThrew === null, 'F5:关闭态的 dispose 可安全调用(实际 ' + disposeThrew + ')');
+
+  // ② 正对照:未传第 5 参 / 显式 enabled=true ⇒ 与修复前**逐字一致**(1 段 + 1 个 context)
+  for (const [label, opts] of [['未传第 5 参(旧调用点)', null], ['enabled=true', { enabled: true }]]) {
+    const on = mkCtx();
+    const memOn = memStub();
+    const d = opts
+      ? registerMemorySection(on.ctx, gate, memOn, { get: () => S }, opts)
+      : registerMemorySection(on.ctx, gate, memOn, { get: () => S });
+    eq(on.calls.section.length, 1, `F5:${label} ⇒ 注册 1 个记忆段(实际 ${JSON.stringify(on.calls.section)})`);
+    eq(on.calls.section[0], SECTION_NAME, `F5:${label} ⇒ 段名 ${SECTION_NAME}`);
+    eq(on.calls.context.length, 1, `F5:${label} ⇒ 注册 1 个 context 时间锚(实际 ${JSON.stringify(on.calls.context)})`);
+    eq(on.calls.context[0], CLOCK_CONTEXT_NAME, `F5:${label} ⇒ context 名 ${CLOCK_CONTEXT_NAME}`);
+    eq(String(memOn._kv.get('inject.section_registered')), '1', `F5:${label} ⇒ 留痕照旧写 1`);
+    d();
+  }
+
+  // ③ 接线判据:光给 registerMemorySection 加参数**不算修** —— index.js 必须真的把 cfg 传进去。
+  //    否则这就退化成"函数支持了、调用点没传"的空修(注释说谎换了个地方而已)。
+  const idxSrc = readFileSync(join(root, 'lib/index.js'), 'utf8');
+  check(/registerMemorySection\(\s*ctx,\s*gate,\s*memory,\s*settings,\s*\{\s*enabled:\s*cfg\.injectEnabled !== false\s*\}\s*\)/
+    .test(idxSrc), 'F5:index.js 把 cfg.injectEnabled 传进注册函数(接线,不是只加参数)');
+  check(!/injectEnabled\s*===\s*false\s*\?\s*'0'\s*:\s*'1'/.test(idxSrc) || idxSrc.includes('inject_enabled_config'),
+    'F5:inject_enabled_config 留痕仍在(关掉也要留痕,不能静默)');
+
+  // ④ 注释口径必须与改后为真:两处旧注释是这次"记账说谎"的另一半
+  const ymlSrc = readFileSync(join(root, 'cordis.patch.yml'), 'utf8');
+  const ymlLine = ymlSrc.split(/\r?\n/).find((l) => l.includes('injectEnabled: false')) || '';
+  check(ymlLine.length > 0, 'F5:cordis.patch.yml 仍有 injectEnabled 示例行');
+  check(!ymlLine.includes('完全关闭系统提示注入'),
+    'F5:cordis.patch.yml 不再声称"完全关闭系统提示注入"(实际:' + ymlLine.trim() + ')');
+  check(/记忆段/.test(ymlLine), 'F5:cordis.patch.yml 说清关掉的是记忆段(实际:' + ymlLine.trim() + ')');
+  const snapSrc = readFileSync(join(root, 'lib/host/snapshot.js'), 'utf8');
+  check(!/总闸仍是 cordis 层的 cfg\.injectEnabled/.test(snapSrc),
+    'F5:snapshot.js 不再把 cfg.injectEnabled 叫"总闸"(它只管记忆段)');
 }
 
 rmSync(dir, { recursive: true, force: true });

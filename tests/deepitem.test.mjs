@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
-const { MemoryStore } = await imp('lib/host/memory.js');
+const { MemoryStore, DEEP_RETRACTED } = await imp('lib/host/memory.js');
 
 let ok = true;
 const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
@@ -94,6 +94,35 @@ eq(Number(m.deepItemById(a3.id).pinned), 1, 'E6:置顶写入');
 eq(m.listDeepItems()[0].id, a3.id, 'E6:排面按 置顶 → 加固 → 新(置顶的排最前)');
 check(m.deepItemCount() >= 3, 'E6:deepItemCount 计数');
 eq(m.listDeepItems({ kind: 'commitment' }).every((r) => r.kind === 'commitment'), true, 'E6:按 kind 过滤');
+
+section('8) 作废一条结论(B 档,2026-10-15 用户拍板「允许作废一条结论」)');
+const rBefore = m.deepRetiredCount();
+const victim = m.addDeepItem({ kind: 'fact', text: '这条待会儿要被作废', convId: 'sess-c', seqFrom: 1, seqTo: 1 });
+check(victim.ok === true, 'E8:先落一条待作废的');
+const ret = m.retractDeepItem(victim.id, { reason: '用户说这条不算数了', by: 'user' });
+eq(ret.ok, true, 'E8:作废成功');
+eq(String(m.deepItemById(victim.id).superseded_by), DEEP_RETRACTED,
+  'E8:标的是哨兵 retracted(**不是删行**)');
+check(m.db.prepare('SELECT id FROM deep_item WHERE id=?').get(victim.id) !== undefined, 'E8:行仍在库里');
+check(!m.listDeepItems().some((r) => r.id === victim.id),
+  'E8:默认读路径**不再挑**它 —— 开场选择 / recall / 面板判的是同一处(superseded_by 非空)');
+check(m.listDeepItems({ includeSuperseded: true }).some((r) => r.id === victim.id),
+  'E8:includeSuperseded:true 仍看得见(只追不替)');
+eq(m.deepRetiredCount(), rBefore + 1, 'E8:退役计数 +1(与总数分开报)');
+const rlog = JSON.parse(String(m.kvGet('deep.retract:' + victim.id)));
+eq(rlog.reason, '用户说这条不算数了', 'E8:"为什么作废"落 kv(**答案在库里,不在某次会话里**)');
+eq(String(rlog.by), 'user', 'E8:留痕记了是谁作废的');
+eq(String(m.retractDeepItem(victim.id, { reason: '再作废一次' }).reason), 'already-retired',
+  'E8:重复作废被拒');
+eq(JSON.parse(String(m.kvGet('deep.retract:' + victim.id))).reason, '用户说这条不算数了',
+  'E8:先前理由**没被盖掉**(拒得对)');
+eq(String(m.retractDeepItem('di:nope', { reason: '这条不存在' }).reason), 'not-found', 'E8:作废不存在的 id → not-found');
+// 作废与"被取代"是两条路:被取代的也计进 retired,但 superseded_by 记的是接替者的 id
+const succ = m.addDeepItem({ kind: 'fact', text: '接替上一条的新结论', convId: 'sess-c', seqFrom: 2, seqTo: 2 });
+m.supersedeDeepItem(victim.id, succ.id);
+eq(String(m.deepItemById(victim.id).superseded_by), String(succ.id),
+  'E8:作废之后**仍可被取代**(哨兵不是"永久锁死",留痕可继续推进)');
+eq(m.deepRetiredCount(), rBefore + 1, 'E8:retired 计数把"取代"与"作废"都算进去(两者都是"不再挑")');
 
 // 7) **老库迁移**:v16 结构(deep_item 已存在、但没有 durability 列)⇒ 重开必须自愈。
 //   ⚠️ 这条专打 2026-10-04 那个只在「老库 + 新代码」下才炸的 bug:当时把

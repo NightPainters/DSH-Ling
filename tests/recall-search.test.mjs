@@ -56,15 +56,15 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     { header: { id: 'sub-1', origin: 'subagent' }, bestMatch: { type: 'assistant/message', seq: 7, time: 1759000000000, snippet: '子代理的话' } },
   ];
   const visible = visibleIdSet(hits);
-  const r = toSearchRows(hits, { visible, callName: '尝生' });
+  const r = toSearchRows(hits, { visible, callName: '用户' });
   check(r.rows.length === 1, '默认范围应只剩 1 条,实得 ' + r.rows.length);
   check(r.skipped === 1, '被挡掉的必须计数(skipped=1),实得 ' + r.skipped);
-  check(r.rows[0].who === '尝生', 'user/message 应显示称呼');
+  check(r.rows[0].who === '用户', 'user/message 应显示称呼');
   check(!/\n/.test(r.rows[0].snippet), '摘要必须单行化');
   check(r.rows[0].seq === 113 && r.rows[0].time.length > 0, '序与时间应带出');
   const all = toSearchRows(hits, { all: true });
   check(all.rows.length === 2 && all.skipped === 0, 'all=true 应全放行');
-  check(all.rows[1].who === '鱼姬', 'assistant/message 显示鱼姬');
+  check(all.rows[1].who === '器灵', 'assistant/message 显示器灵');
   check(toSearchRows(null, {}).rows.length === 0, 'null hits 不抛');
 }
 
@@ -72,7 +72,7 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
 {
   const good = renderSearch({
     ok: true, q: '记忆树 血缘', all: false, skipped: 2, hasMore: true,
-    rows: [{ conv: 'session-x', seq: 113, time: '10-04 19:33', who: '尝生', snippet: '先等等' }],
+    rows: [{ conv: 'session-x', seq: 113, time: '10-04 19:33', who: '用户', snippet: '先等等' }],
   });
   check(typeof good === 'string' && good.includes('记忆树 血缘'), '正常回执应含查询词');
   check(good.includes('主人自己的会话'), '默认范围要在回执里说明');
@@ -119,8 +119,8 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     superseded_by TEXT DEFAULT '', origin TEXT DEFAULT 'auto', branch_id TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT '')`);
   const ins = db.prepare('INSERT INTO deep_item (id,kind,text,conv_id,seq_from,seq_to,src,superseded_by,hit_count,pinned,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-  ins.run('di:1', '承诺', '鱼姬汇报必须基于自己实测的凭据', 'conv-a', 10, 12, 'dsh', '', 0, 0, '2026-10-04 01:00:00');
-  ins.run('di:2', '偏好', '尝生的原则：不投资股市、不盯盘', 'conv-b', 3, 3, 'dsh', '', 0, 0, '2026-10-04 02:00:00');
+  ins.run('di:1', '承诺', '器灵汇报必须基于自己实测的凭据', 'conv-a', 10, 12, 'dsh', '', 0, 0, '2026-10-04 01:00:00');
+  ins.run('di:2', '偏好', '用户的原则：不投资股市、不盯盘', 'conv-b', 3, 3, 'dsh', '', 0, 0, '2026-10-04 02:00:00');
   ins.run('di:3', '决定', '记忆树血缘可溯', 'conv-a', 20, 20, 'dsweb', '', 0, 0, '2026-10-04 03:00:00');
   ins.run('di:4', '事实', '这条已被取代', 'conv-c', 1, 1, 'dsh', 'di:9', 0, 0, '2026-10-04 04:00:00');
   const mem = { db };
@@ -138,7 +138,7 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   // 渲染:条目段必须出现、且两种命中能同屏
   const onlyDeep = renderSearch({
     ok: true, q: '凭据', all: false, skipped: 0, rows: [],
-    deep: [{ kind: '承诺', text: '鱼姬汇报必须基于实测凭据', conv_id: 'conv-a', seq_from: 10, seq_to: 12, pinned: 0 }],
+    deep: [{ kind: '承诺', text: '器灵汇报必须基于实测凭据', conv_id: 'conv-a', seq_from: 10, seq_to: 12, pinned: 0 }],
   });
   check(onlyDeep.includes('深层库条目'), '有条目时要出现条目段');
   check(onlyDeep.includes('[承诺]'), '条目要带 kind');
@@ -155,14 +155,14 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   check(!onlyDeep.includes('${'), '条目回执不许有未插值');
   check(renderSearch({
     ok: true, q: 'x', all: false, deep: [{ kind: '偏好', text: '一句话', conv_id: 'c' }],
-    rows: [{ conv: 'c2', seq: 1, time: '10-04 20:08', who: '尝生', snippet: 's' }],
+    rows: [{ conv: 'c2', seq: 1, time: '10-04 20:08', who: '用户', snippet: 's' }],
   }).includes('会话原文层'), '条目会话双命中时两段都在');
   check(renderSearch({
-    ok: true, q: 'x', all: false, deep: [], rows: [{ conv: 'c2', seq: 1, time: 't', who: '尝生', snippet: 's' }],
+    ok: true, q: 'x', all: false, deep: [], rows: [{ conv: 'c2', seq: 1, time: 't', who: '用户', snippet: 's' }],
   }).includes('找到 1 轮原文'), '无条目时也要有明确说法(口径:现在是"轮原文"而不是"个会话" —— 本地层按轮给)');
   check(renderSearch({
     ok: true, q: 'x', all: false, local: true, deep: [],
-    rows: [{ conv: 'c2', seq: 1, time: 't', who: '尝生', snippet: 's' }],
+    rows: [{ conv: 'c2', seq: 1, time: 't', who: '用户', snippet: 's' }],
   }).includes('本机库内原文层'), '★ A方案:本地路回执必须标注来源(残的那份要说清,否则会被读成"库里只有这些")');
   check(renderSearch({ ok: true, q: 'x', all: false, deep: [], rows: [], skipped: 0 }).includes('没找到'), '都没命中时仍要明确说法');
   check(SEARCH_DEEP_MAX > 0 && SEARCH_DEEP_MAX <= 50, 'SEARCH_DEEP_MAX 在合理区间');
@@ -346,6 +346,75 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   check(!/已在「\*\*主人自己的会话\*\*」内/.test(loc), '★ 本地路**不许**谎称"已在主人自己的会话内"');
   const host = renderSearch({ ok: true, q: 'x', all: false, deep: [], rows: [], skipped: 0 });
   check(/已在「\*\*主人自己的会话\*\*」内/.test(host), '宿主路(无 localScope)照旧印"已在主人自己的会话内"(没被误伤)');
+}
+
+// ── 12) F3:库**读不出来** ≠ 零命中(降级口径不对称 · 1.7 修复批次)───────────────────
+//   病灶:`recall-search.js:113`/`:153` 两处 `catch { return [] }` 把**底层库读失败**归并成
+//   **零命中**,而本地路**无条件回 ok:true** ⇒ 渲染成「按内容没找到」。同文件对**宿主那条路**
+//   却是严格分开的(`search-unavailable` / 超时专用文案)—— 违反项目自己的口径「库不可用 ≠ 零命中」。
+//   本节的判据要**双向**:① 库坏 ⇒ 必须说"不是库里没有";② 库**缺表** ⇒ 仍静默零命中(有意设计,不许改掉)。
+{
+  const { registerLingTools } = await imp('lib/host/tools.js');
+  const mkRecall = (db) => {
+    const specs = new Map();
+    const ctx = { tools: { register: (spec) => { specs.set(spec.name, spec); return () => specs.delete(spec.name); } } };
+    registerLingTools(ctx, {
+      gate: { snapshotIds: () => [] }, memory: { db, kvSet() {}, kvGet: () => '' }, settings: { get: () => ({}) }, library: null,
+    });
+    return specs.get('recall');
+  };
+  // 走**工具的真实两段**(execute + render)—— 只调纯函数会漏掉"文案物理不可达"那一类
+  // (renderRecall 曾在 `ok!==true` 时自己先拦,三句降级文案根本到不了模型眼前)。
+  const receipt = async (db, args = { q: '记忆树' }) => {
+    const tool = mkRecall(db);
+    const v = await tool.execute(args, {});
+    const text = tool.output.render([args], v).map((x) => x.text).join('\n');
+    return { v, text };
+  };
+
+  const broken = { prepare() { throw new Error('database disk image is malformed'); } };
+  const missing = { prepare() { throw new Error('no such table: dsh_turns_raw'); } };
+
+  // ① 主判据:库损坏 ⇒ 明说"这不是库里没有"(修前是「按内容没找到(查询…)」⇒ 红)
+  const b = await receipt(broken);
+  check(b.v.ok === false && b.v.reason === 'local-unavailable',
+    '★ 库读不出来 ⇒ ok:false + reason=local-unavailable(实际 ' + JSON.stringify(b.v.reason) + ')');
+  check(/不是"库里没有"/.test(b.text),
+    '★ 回执明说"这不是库里没有"(实际:' + b.text.slice(0, 140) + ')');
+  check(!/没找到/.test(b.text), '★ 回执**不含**「没找到」 —— 那是另一种结论,两者的下一步动作不同');
+  check(/recall\(\)/.test(b.text), '★ 给出替代动作:不带参数的 recall() 按时间翻清单');
+
+  // ② 正对照:库**缺表** ⇒ 仍静默零命中、回执仍是"没找到"族(有意设计,不许被这次修复改掉)
+  const m = await receipt(missing);
+  check(m.v.ok === true, '★ 缺表 ⇒ 仍是"正常但零命中"(检索面不该因为某张表缺席而整体失败)');
+  check(/按内容没找到/.test(m.text), '★ 缺表 ⇒ 回执仍是"没找到"族(有意行为)');
+  check(!/不是"库里没有"/.test(m.text), '★ 缺表**不许**印"库读不出来"(那会变成另一种假话)');
+
+  // ③ 收窄判据(纯函数层):两处 catch 只吞"表 / 列不存在",库损坏 / 被占用 / SQL 错必须往上冒
+  //   ⚠️ 入参是 **memory**(函数从 `memory.db` 取连接),不是连接本身 —— 传错会静默走 `return []` 那条早退。
+  const memBroken = { db: broken };
+  const memMissing = { db: missing };
+  let threwLocal = null;
+  try { searchLocalTurns(memBroken, 'x', 5, {}); } catch (e) { threwLocal = e; }
+  check(threwLocal && /malformed/.test(String(threwLocal.message)),
+    '★ searchLocalTurns:库损坏**必须往上冒**(不再吞成零命中),实际 ' + threwLocal);
+  check(searchLocalTurns(memMissing, 'x', 5, {}).rows.length === 0, '★ searchLocalTurns:缺表照旧静默空(有意设计未被破坏)');
+  let threwDeep = null;
+  try { searchDeepItems(memBroken, 'x', 5); } catch (e) { threwDeep = e; }
+  check(threwDeep && /malformed/.test(String(threwDeep.message)),
+    '★ searchDeepItems:库损坏**必须往上冒**,实际 ' + threwDeep);
+  check(searchDeepItems(memMissing, 'x', 5).length === 0, '★ searchDeepItems:缺表照旧静默空');
+
+  // ④ 条目层那一半也要包进去(它的调用点在旧 try **之外**):深层库读失败同样不许被读成零命中
+  const localOkDeepBad = {
+    prepare(sql) {
+      if (/dsh_turns_raw/.test(String(sql))) return { all: () => [] };
+      throw new Error('database disk image is malformed');
+    },
+  };
+  const d = await receipt(localOkDeepBad);
+  check(d.v.ok === false && d.v.reason === 'local-unavailable',
+    '★ deep_item 那一半读失败也走同一条降级(不是只包了原文层半条路),实际 ' + JSON.stringify(d.v.reason));
 }
 
 console.log(ok ? '✓ recall-search 全部通过' : '✗ recall-search 有失败项');

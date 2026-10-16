@@ -625,8 +625,8 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
 //    · 删掉了端点 ⇒ 从数组里删掉;**数与列表必须同批改**(否则数字与列表会互相说谎)。
 // 判据来源:`plans\AUDIT-dsh-ling-1.5.3-端点写面-未进POST_ONLY.md`(逐条读过 handler 的那份审计)。
 {
-  const POST_ONLY_ROUTES_TOTAL = 79;   // 已注册端点数(disposers.push(register('…')))
-  const POST_ONLY_SET_SIZE = 55;       // POST_ONLY 集合条数
+  const POST_ONLY_ROUTES_TOTAL = 93;   // 已注册端点数(disposers.push(register('…')));88 → 90 = 1.7 导入通道两条(2026-10-10);90 → 91 = 浏览面 /library/browse 一条(2026-10-13,纯读);91 → 92 = 结论层只读面 /deep/items 一条(B 档,2026-10-15,纯读);92 → 93 = 后台行为开关 /auto 一条(2026-10-16,**双方法**:GET 读生效值 / POST 写 settings.auto ⇒ 不进差集)
+  const POST_ONLY_SET_SIZE = 62;   // POST_ONLY 集合条数;59 → 61 = 1.7 导入通道两条(两条都**是写面** ⇒ 差集不变);61 → 62 = /auto(它的**写半边**只许 POST ⇒ 进表;读半边另见 api.js 的 `DUAL_METHOD_READ_PATHS` —— 那张表只为它放行 GET,否则读半边会被这道闸 405 掉)
   const POST_ONLY_DIFF_SNAPSHOT = [
     '/surgery/events',            // 事后日志(读手术门留痕),GET 不写
     '/health',
@@ -651,7 +651,14 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
     '/feedback',
     '/suggestions',
     '/deep/status',
+    '/deep/items',             // 结论层只读面(B 档,2026-10-15):纯读,写面走工具 deep_item
     '/export',                    // 资源型:序列化 bundle(?includeRaw=1 含原文,响应体很大)
+    '/library/status',            // 1.7 图书馆**只读**六面:在 api.js 的 GET_ONLY 表里(见下面 9.6)
+    '/library/search',            //   读面不进 POST_ONLY **是因为**它另有"只许 GET"那一半闸;
+    '/library/browse',            //   浏览面(2026-10-13):不搜也能翻,纯读无副作用(分组计数 + 分页)
+    '/library/item',              //   这正是 9.6 要盯的:光看差集分不出"只读"和"忘了加写面闸"。
+    '/library/history',
+    '/library/checks',
   ];
   const setBlock = apiSrc.match(/const POST_ONLY = new Set\(\[([\s\S]*?)\]\);/);
   const postOnly = [...String(setBlock && setBlock[1] || '').replace(/\/\/[^\n]*/g, '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
@@ -666,6 +673,45 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
     '★C 差集快照逐条相等(实测 ' + diff.length + ' 条:' + diff.join(' ') + ')');
   check(postOnly.every((p) => routes.includes(p)),
     'C 护栏:POST_ONLY 里没有"注册表里不存在"的路径(把路径名打错会在这里红)');
+}
+
+// ── 9.6 C2(1.7):`GET_ONLY` 集合覆盖判据(补上"差集分不出来"的那一半)─────────────────────────
+// 9.4 的差集快照只说"这些端点**不在** POST_ONLY 里",**分不出**两种完全不同的情况:
+//   (a) 真·只读端点;(b) 有人**忘了**给写面加闸(写面漏进差集,快照一抄就"绿灯"了)。
+// 1.7 起 api.js 多了一张 `GET_ONLY` 表(读面只许 GET,POST ⇒ 405),于是这一半也要有人盯:
+//   · 两张表**不许相交**(同一路径既"只许 GET"又"只许 POST" = 谁也进不去,或是有人写错了);
+//   · GET_ONLY 里的路径**必须真的注册过**(打错路径名要在这里红,而不是等运行期 404);
+//   · GET_ONLY 的条数**钉死**(读数变了 ⇒ 有人加了/删了读面,请回来看这段注释)。
+// ⚠️ 变红时该做的判断:新读面 ⇒ 加进 api.js 的 `GET_ONLY` 并同批改下面的 `GET_ONLY_SET_SIZE`;
+//    新写面 ⇒ 加进 `POST_ONLY`(9.4 的差集自然少一条,数与列表同批改);删端点 ⇒ 两边同批删。
+{
+  const GET_ONLY_SET_SIZE = 7;   // 六面 + 结论层只读面 /deep/items(B 档 2026-10-15;六面 = status / search / item / history / checks / browse)
+  const getBlock = apiSrc.match(/const GET_ONLY = new Set\(\[([\s\S]*?)\]\);/);
+  const getOnly = [...String(getBlock && getBlock[1] || '').replace(/\/\/[^\n]*/g, '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const postBlock = apiSrc.match(/const POST_ONLY = new Set\(\[([\s\S]*?)\]\);/);
+  const postOnly = [...String(postBlock && postBlock[1] || '').replace(/\/\/[^\n]*/g, '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const routes = [...apiSrc.matchAll(/disposers\.push\(register\('([^']+)'/g)].map((m) => m[1]);
+  check(!!getBlock, 'C2 护栏:`GET_ONLY` 声明块能被解析(源码形状没被改写)');
+  check(getOnly.length === GET_ONLY_SET_SIZE,
+    '★C2 GET_ONLY 条数 = ' + GET_ONLY_SET_SIZE + '(实测 ' + getOnly.length + ')');
+  check(getOnly.every((p) => routes.includes(p)),
+    '★C2 GET_ONLY 里没有"注册表里不存在"的路径(打错路径名在这里红;实测 '
+    + getOnly.filter((p) => !routes.includes(p)).join(' ') + ')');
+  const both = getOnly.filter((p) => postOnly.includes(p));
+  check(both.length === 0,
+    '★C2 GET_ONLY 与 POST_ONLY **不相交**(同一路径不许既"只许 GET"又"只许 POST";实测相交 '
+    + both.join(' ') + ')');
+  // 图书馆六个读面必须**逐条**在 GET_ONLY 里(名字写死:这是"读面有闸"这件事本身)
+  for (const p of ['/library/status', '/library/search', '/library/item', '/library/history', '/library/checks', '/library/browse']) {
+    check(getOnly.includes(p), '★C2 图书馆读面在 GET_ONLY 里:' + p);
+  }
+  // 反向:写面必须**不在** GET_ONLY 里(否则 POST 会被自己的读面闸 405 掉)
+  // 1.7 导入通道两条(2026-10-10)同属写面:analyze 收整份原文 + 可带模型段;commit 真落库。
+  const writeFaces = ['/library/create', '/library/revise', '/library/withdraw', '/library/check',
+    '/library/import/analyze', '/library/import/commit'];
+  check(writeFaces.every((p) => postOnly.includes(p) && !getOnly.includes(p)),
+    '★C2 图书馆六个写面只在 POST_ONLY 里(不在 GET_ONLY):'
+    + writeFaces.filter((p) => !postOnly.includes(p) || getOnly.includes(p)).join(' '));
 }
 
 // ── 9.5 E2 可见化(2026-10-01):未知原文来源的**读面**与**前台那一句** ─────────────────────────

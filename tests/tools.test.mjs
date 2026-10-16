@@ -17,6 +17,7 @@ const {
   TREE_READ_SPEC, BRANCH_EDIT_SPEC, MEMORY_FORGET_SPEC, MEMORY_BACKFILL_SPEC,
   TOOL_RULE_ADD, TOOL_HABIT_PROPOSE, TOOL_HABIT_RESOLVE, TOOL_TREE_READ, TOOL_BRANCH_EDIT,
   TOOL_MEMORY_FORGET, TOOL_MEMORY_BACKFILL, TOOL_RECALL,
+  TOOL_DEEP_ITEM, DEEP_ITEM_SPEC, DEEP_KINDS, DEEP_DURABILITIES, DEEP_TEXT_MAX, checkDeepItem,
 } = await imp('lib/host/tools.js');
 
 const dir = mkdtempSync(join(tmpdir(), 'ling-tools-'));
@@ -80,10 +81,15 @@ check(/比遗忘更危险/.test(MEMORY_BACKFILL_SPEC.description), 'backfill:描
 const registered = [];
 const fakeCtx = { tools: { register: (spec) => { registered.push(spec); return () => {}; } } };
 const r1 = registerLingTools(fakeCtx, { gate: { snapshotIds: () => [] }, memory: { kvSet: () => {} }, settings });
-check(r1.ok === true && registered.length === 8, '注册成功:八个工具(G1 加树工具,G2 加遗忘/回灌,1.6-P2 加直通原文)');
-check(registered.map((s) => s.name).sort().join(',')
-  === 'branch_edit,habit_propose,habit_resolve,memory_backfill,memory_forget,recall,rule_add,tree_read',
-  '注册的是这八个名字');
+check(r1.ok === true && registered.length === 11,
+  '注册成功:十一个工具(G1 加树工具,G2 加遗忘/回灌,1.6-P2 加直通原文,1.7 加图书馆检索/核对,B 档加深层库落条/作废)');
+// ⚠️ 旧的八个名字**仍然逐字守住**(1.7 只新增两个,不许挤掉任何一个):
+const OLD_EIGHT = 'branch_edit,habit_propose,habit_resolve,memory_backfill,memory_forget,recall,rule_add,tree_read'.split(',');
+const regNames = registered.map((s) => s.name).sort();
+check(regNames.every((n) => n) && OLD_EIGHT.every((n) => regNames.includes(n)),
+  '旧八个工具一个不少(1.7 之后仍全在)');
+check(regNames.join(',') === [...OLD_EIGHT, 'deep_item', 'library_check', 'library_search'].sort().join(','),
+  '注册的是这十一个名字(旧八 + library_check/library_search + deep_item)');
 check(registered.some((s) => s.name === TOOL_RECALL), 'recall(直通原文,1.6-P2)已注册');
 const r2 = registerLingTools({ get: () => null }, { gate: null, memory: null, settings });
 check(r2.ok === false && r2.reason === 'no-tools', '无 tools 服务 → 优雅降级(不抛错)');
@@ -125,6 +131,67 @@ registerLingTools(ctx2, { gate: gate2, memory: memReal, settings });
 const tool2 = reg2.find((s) => s.name === TOOL_RULE_ADD);
 await tool2.execute({ rule: '遇事先给数字', quote: '遇到事先给数字' }, {});
 check(rebuilt === 2 && staled === 0, '写入后两个空闲会话的快照立即重建(实际 rebuilt=' + rebuilt + ', staled=' + staled + ')');
+
+// 2e) 深层库(结论层)工具(B 档,2026-10-15 用户拍板):手动落条 / 作废 / 列
+//   钉住的是"纪律"而不是"能跑":落条是**经他授权**的动作、超长不自动截断、作废只标记不删。
+check(DEEP_ITEM_SPEC.name === 'deep_item' && TOOL_DEEP_ITEM === 'deep_item', 'deep:工具名');
+check(Array.isArray(DEEP_KINDS) && DEEP_KINDS.length === 6, 'deep:六类齐(承诺/决定/事实/偏好/关系/纪律)');
+check(checkDeepItem({}).reason === 'empty-kind', 'deep:空 kind → empty-kind');
+check(checkDeepItem({ kind: '决定' }).reason === 'empty-text', 'deep:空正文 → empty-text');
+check(checkDeepItem({ kind: '决定', text: 'x'.repeat(DEEP_TEXT_MAX) }).ok === true, 'deep:刚好 80 字通过');
+check(checkDeepItem({ kind: '决定', text: 'x'.repeat(DEEP_TEXT_MAX + 1) }).reason === 'too-long',
+  'deep:超 ' + DEEP_TEXT_MAX + ' 字 → too-long(**不自动截断**)');
+check(checkDeepItem({ kind: '决定', text: '短' }).durability === 'long', 'deep:durability 缺省 long');
+check(checkDeepItem({ kind: '决定', text: '短', durability: 'forever' }).reason === 'bad-durability',
+  'deep:非法硬度当场拒(不静默回落到 long)');
+check(checkDeepItem({ action: 'retract', id: 'di:x' }).reason === 'no-reason', 'deep:作废缺理由 → no-reason');
+check(checkDeepItem({ action: 'retract', reason: '这条不算数了' }).reason === 'no-id', 'deep:作废缺 id → no-id');
+check(checkDeepItem({ action: 'nope' }).reason === 'bad-action', 'deep:未知 action → bad-action');
+check(checkDeepItem({ action: 'list' }).limit === 50, 'deep:list 缺省 50 条');
+check(checkDeepItem({ action: 'list', limit: 999 }).limit === 200, 'deep:list 上限夹到 200');
+check(/只在主人明确要求|经主人授权/.test(DEEP_ITEM_SPEC.description), 'deep:描述写明调用纪律(不许自己觉得重要就落)');
+check(/不自动截断/.test(DEEP_ITEM_SPEC.description), 'deep:描述写明超长不截断');
+check(DEEP_ITEM_SPEC.parameters.required.includes('action'), 'deep:action 是必填参数');
+
+const deepTool = reg2.find((s) => s.name === TOOL_DEEP_ITEM);
+check(!!deepTool, 'deep:工具已注册(真库那一组)');
+const dBefore = memReal.deepItemCount();
+const dDry = await deepTool.execute({ action: 'add', kind: '决定', text: '干跑这条不该落库', dryRun: true }, {});
+check(dDry.ok === true && dDry.dryRun === true && memReal.deepItemCount() === dBefore,
+  'deep:dryRun 出正式回执但**不落库**');
+const dAdd = await deepTool.execute(
+  { action: 'add', kind: '决定', text: 'B 档先做手动落条与文档灌入' }, { agent: { sessionId: 's-deep' } });
+check(dAdd.ok === true && String(dAdd.id).startsWith('di:') && dAdd.existed === false,
+  'deep:落条成功,返回 di: id');
+const dRow = memReal.deepItemById(dAdd.id);
+check(String(dRow.origin) === 'user', 'deep:origin=user(手动落的;自动提炼不许覆盖它)');
+check(String(dRow.conv_id) === 's-deep', 'deep:来源会话取自 exec(不落空)');
+check(String(dRow.at) !== '', 'deep:at 缺省给今天(不写空字符串)');
+check(/落进结论层/.test(deepTool.output.render({}, dAdd)[0].text), 'deep:回执复述"落进结论层"');
+check(/会参与开场选择/.test(deepTool.output.render({}, dAdd)[0].text), 'deep:回执如实说会不会进开场');
+const dEph = await deepTool.execute({ action: 'add', kind: '决定', text: '这一条只在今天算', durability: 'ephemeral' }, {});
+check(/不进开场/.test(deepTool.output.render({}, dEph)[0].text), 'deep:ephemeral 回执明说**不进开场**');
+const dDup = await deepTool.execute(
+  { action: 'add', kind: '决定', text: 'B 档先做手动落条与文档灌入', convId: 's-deep' }, {});
+check(dDup.existed === true && dDup.id === dAdd.id, 'deep:同段重复落 → existed(幂等键 (conv,seq,text) 生效)');
+const dList = await deepTool.execute({ action: 'list' }, {});
+check(dList.ok === true && dList.retired === 0 && dList.all === memReal.deepItemCount(),
+  'deep:list 把"在役"与"已退役"分开报(此时全是役)');
+const dRet = await deepTool.execute({ action: 'retract', id: dAdd.id, reason: '这条是回归测试造的' }, {});
+check(dRet.ok === true && dRet.superseded_by === 'retracted', 'deep:作废成功并回哨兵值 retracted');
+check(/只标记不删/.test(deepTool.output.render({}, dRet)[0].text), 'deep:作废回执写明只标记不删');
+check(memReal.deepItemById(dAdd.id) !== undefined, 'deep:作废后**行还在**(不真删)');
+const dList2 = await deepTool.execute({ action: 'list' }, {});
+check(dList2.retired === 1 && dList2.all === memReal.deepItemCount() - 1,
+  'deep:作废后 list 不再列它,退役计数如实 +1');
+check((await deepTool.execute({ action: 'retract', id: dAdd.id, reason: '再作废一次试试看' }, {})).reason === 'already-retired',
+  'deep:重复作废被拒(理由不被后一次盖掉)');
+check((await deepTool.execute({ action: 'retract', id: 'di:不存在', reason: '不存在的条目' }, {})).reason === 'not-found',
+  'deep:作废不存在的 id → not-found(不静默成功)');
+check((await deepTool.execute({ action: 'add', kind: '决定', text: 'x'.repeat(200) }, {})).reason === 'too-long',
+  'deep:超长经工具层当场拒');
+// 收尾:把回归造的条目也作废掉,免得它参与后续断言(真库这一组只有本套在用)
+await deepTool.execute({ action: 'retract', id: dEph.id, reason: '回归收尾清理' }, {});
 
 // 6) 通道 D:他提议 → 我表态(habit_resolve)
 check(checkHabitResolve({ action: 'accept' }).ok === true, '表态:accept 合法');
@@ -422,9 +489,13 @@ check(obOk.outbound.length === 1 && !obOk.problems.some((p) => p.id === 'F-OUTBO
 const obBad = scanText('lib/client.js', 'function evil(){ return ' + FETCH + "'https://example.com/x'); }");
 check(obBad.problems.some((p) => p.id === 'F-OUTBOUND-NOT-WHITELISTED'),
   '出站:白名单外的调用被报出来(按归属函数判定,不按行号)');
-// 基线 2026-10-01 从 4 提到 6:新增的两处都是 lib/client.js 里**同源**的手术门票据端点
-// (常量 API = '/api/dsh-ling',相对路径)与其重发分支;定性依据写在 tools/compliance-spec.mjs 的 OUTBOUND 注释里。
-check(OUTBOUND.baseline === 6 && OUTBOUND.re.test(FETCH), `出站:基线 ${OUTBOUND.baseline} 处,模式对 ${FETCH} 有效`);
+// 基线沿革:2026-10-01 从 4 提到 6(新增的两处都是 lib/client.js 里**同源**的手术门票据端点
+// 常量 API = '/api/dsh-ling',相对路径,与其重发分支);2026-10-16 从 6 提到 23(图书馆远程核对 2 处
+// + tests/ 三个文件的离线替身 15 处);同日再从 23 提到 25(tests/auto-config.test.mjs 新加的
+// /auto HTTP 回归 2 处,都是本机 listen(0) 临时服务上的离线替身)。三次的逐处定性依据都写在
+// tools/compliance-spec.mjs 的 OUTBOUND 注释里。
+// 这里钉的是"基线没被顺手改掉",不是"基线等于某个固定的数" —— 改基线必须同批改这一行(2026-10-16 漏改过一次,套件红)。
+check(OUTBOUND.baseline === 25 && OUTBOUND.re.test(FETCH), `出站:基线 ${OUTBOUND.baseline} 处,模式对 ${FETCH} 有效`);
 
 // 真实现状:README 的声明面(另一路 2026-09-26 已补齐 M1/M2/M3/M4;缺了会在这里点名)
 const { readFileSync: rf } = await import('node:fs');

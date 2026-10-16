@@ -2,7 +2,7 @@
 
 > ⚠️ **总警示**:本文是 **M1 阶段的设计底稿**;M2/M3 的许多项**已经实现**(配置完整页、记忆树可视化、导出/合并 UI、概述器、反馈成长回路、人格草稿脚本等),**以 `README.md` 与本版代码为准** —— 本文只当立项记录读,不得当作现状契约。
 > 依据:立项阶段的一次接口探测 spike 结论(含本地文件:行号证据)。
-> 体例:正文里 `**锚点**` 是**本文档内部的交叉引用**,不是对外证据 —— 其中 `plans\`、`release\` 是**作者本地台账,不在本仓库**;随 npm 包发出的是 `package.json` 的 `files` 白名单(**10 项**,实测 npm 包共 **58 个文件** —— `DESIGN.md` 自己也在包里,`PHILOSOPHY.md` 自 1.6.2 起也在)。
+> 体例:正文里 `**锚点**` 是**本文档内部的交叉引用**,不是对外证据 —— 其中 `plans\`、`release\` 是**作者本地台账,不在本仓库**;随 npm 包发出的是 `package.json` 的 `files` 白名单(**项数与实际发出的文件数以该白名单与 `npm pack` 的实际清单为准 —— 这类数字每次加文件都会变,本文不写死**;`DESIGN.md` 自己也在包里,`PHILOSOPHY.md` 自 1.6 系列起也在)。
 > 本文档记录 M1 阶段的设计与决策;**实现以代码为准**(后续演进:存储 schema 现已为 **v17**、新增历史接入/深摘要/诞生仪式/语气成长等子系统,详见仓库代码与提交记录)。
 > ⚠️ **1.6 起,本文的「L1 选择」整条口径作废**(2026-10-04):§0 决策记录、§4 配置样例、§6「记忆管线与 L1 选择 v0」、§8 热度公式里写的
 > **热度 Top-K**、**`l1BudgetTokens: 1200`**、**`L1(Top-K)`** 都已被取代 —— L1 现在选的是**深层库条目**(`deep_item`,一句结论),
@@ -23,6 +23,7 @@
 | D5 | 记忆加载策略 | 三层记忆(L0 常驻人格 / L1 开场 Top-K / L2 运行时检索),不注入全部概述 | 早前拍板 |
 | D6 | 模式语义 | 工作/生活 = 先验倾向,不硬过滤;差异 = **推理档位** + 记忆权重向量 + 风格块(不改模型) | 早前拍板 |
 | D7 | 配置页 | **自建浮层**(非官方设置卡位);**悬停 1.5 秒菜单**进入(原定"右键进入",2026-09-07 修订,见 §5.1);内含"当前 L0/L1 现状"查看 | 早前拍板 |
+| D8 | 深层库(结论层)入库通道 | **先做 B + C,自动提炼(D3 原计划)留 1.7.x**:B = 手动落条(`deep_item`:`add`/`retract`/`list`)与**只读**面板页签;C = 文档灌入(`tools/deep-import-docs.mjs`,先 dry 后 commit,`origin=doc-import-v1`)。**三重护栏**:①**累计预算** —— 第一趟总量 ≤40 条(`≤40` 是**全趟预算**,不是"每次上限":一次 `--commit` 与十次扣的是同一个额度;超额 ⇒ **拒绝再落**,判据 `tests/deep-import-docs.test.mjs` §14)②**过时按文本时间锚分档** —— 含读数/版本号/时点 ⇒ `ephemeral`(**不进开场**,`l1.js:400-403`;`recall` 仍搜得到),原则 + 价值类 ⇒ `durable`,其余 `long`(判据同套件 §13)③**纪律不落** —— 主人 2026-10-15 夜判「纪律是**行动触发型**,不像知识类是内容触发型」,归宿是「规矩」/常驻注入面,留 1.7.x。**作废 = 只标记不删**(`superseded_by='retracted'`,理由落 kv `deep.retract:<id>`);**复查**走 `--review`(`reviewPlan()`:含时间锚却当着长期条 / `ephemeral` 够老 / `hit_count=0` 够老,**只列信号、不作废**)。原话:「深层库(结论层)先把B+C做了,1.7一块发,自动部分1.7.1再说」<!-- ver-hist -->+「纪律先不落吧」 | 用户拍板 2026-10-15 夜(实测底稿 `plans\1.6-深层库-议题.md` §8–§10.2;落库读数 411→451) |
 
 **插件命名**:工程目录/包名 `dsh-ling`(器灵);包显示名 "dsh-ling · 器灵";UI 文本语言 zh。
 
@@ -229,7 +230,7 @@ dsh-ling/
 **安装(复用 install/INSTALL-PLAN 模式;⚠️ 回滚是人工步骤、没有脚本代劳 —— 见第 3 条与 §10 的「回滚」)**:
 1. `pnpm add file:<仓库路径>`(或等价 file: 依赖)进 `$DSH_HOME/profiles/web/package.json`(`<仓库路径>` 按你本机的实际克隆位置替换);
 2. `cordis.patch.yml` 追加行 `- insert: [{id: dsh-ling, name: dsh-ling}]`(loader id == 包名);
-3. patchReload live → host 热载;浏览器硬刷载入 client 模块;失败则**人工**移除该行回滚 —— ⚠️ **这一条没有任何脚本代劳(2026-10-05 现场复核)**:`tools/` 里没有改写或备份 profile 两文件(`package.json`、`cordis.patch.yml`)的代码,「先备份两文件」是**开发期的手工动作**(参照 backup-20260906-170533 做法),不是工具行为;**安装路径上的自动备份只有一处** —— 核心补丁脚本给自己改的那个 core 文件留一份 `<文件>.e4-access-log.orig`(见 `tools\apply-access-log-patch.mjs:190`),撤它是手动跑 `--revert`;
+3. patchReload live → host 热载;浏览器硬刷载入 client 模块;（⚠️ **2026-10-13 现场复核:这一句要更正** —— `patchReload` 这个字段在**当前 DSH 版本里没有任何读者**(对整个 DSH 安装目录 grep ⇒ **0 命中**),真正决定"什么改动会进真机"的是 `@deepseek-ai/dsh-hmr` 的 `root` 配置:base 组合包以 `root: []` 启用它 ⇒ **只监听配置层**(profile manifest + 两份 patch 文件),**源码模块不进监听面** ⇒ **host 侧源码改动必须重启宿主**;客户端模块走的是另一条路(每次加载按产物 stat 重算 rev)⇒ **客户端改动「刷新即生效」**。取证与实测:[live-validation-pitfalls](../plans/1.7-live-validation-pitfalls.md) §24/§26、本文件证据表 **G-25**。原句作为历史记录保留,"浏览器硬刷"那一半仍然成立。)失败则**人工**移除该行回滚 —— ⚠️ **这一条没有任何脚本代劳(2026-10-05 现场复核)**:`tools/` 里没有改写或备份 profile 两文件(`package.json`、`cordis.patch.yml`)的代码,「先备份两文件」是**开发期的手工动作**(参照 backup-20260906-170533 做法),不是工具行为;**安装路径上的自动备份只有一处** —— 核心补丁脚本给自己改的那个 core 文件留一份 `<文件>.e4-access-log.orig`(见 `tools\apply-access-log-patch.mjs:190`),撤它是手动跑 `--revert`;
 4. GUI 鉴权墙:安装后的功能验证需在用户已登录浏览器进行(本机端口 3080)。
 
 **数据目录(插件本体外,更新不丢)**:`dshHomePath('cache','dsh-ling')` → `~/.dsh/cache/dsh-ling/`(memory.db、snapshots、exports)。
@@ -451,7 +452,7 @@ dsh-ling/
 
 **归属解析**(两条链并存):DSH 会话走 `session_meta.branch_id`;历史网页端/导入条目走 `conv_branch` 覆盖层;优先级 `conv_branch` > `session_meta` > 主干。**记忆行不冗余存 branch**,靠 `会话 → 枝` 推导。
 
-**血缘加权**:检索时按"当前枝 → 目标枝"的相对位置取档 —— **同枝 1.0 / 祖先 0.7 / 旁系 0.4**,`score = 基础分 × 血缘系数 × 矛盾系数`;**枝系数自 1.6.2 起参与打分** —— 可写入(复盘期可调,夹在 0~2),按 `score = 基础分 × 血缘系数 × 矛盾系数 × 枝系数` 生效(`1.0` = 零影响;⚠️ **`0` = 该枝的结论不进记忆开场** —— 分数算成 0 的非置顶条目会被当"无信息量"排除,所以 `0` 不是"只是排后面")。
+**血缘加权**:检索时按"当前枝 → 目标枝"的相对位置取档 —— **同枝 1.0 / 祖先 0.7 / 旁系 0.4**,`score = 基础分 × 血缘系数 × 矛盾系数`;**枝系数自 1.6 系列起参与打分** —— 可写入(复盘期可调,夹在 0~2),按 `score = 基础分 × 血缘系数 × 矛盾系数 × 枝系数` 生效(`1.0` = 零影响;⚠️ **`0` = 该枝的结论不进记忆开场** —— 分数算成 0 的非置顶条目会被当"无信息量"排除,所以 `0` 不是"只是排后面")。
 
 > ⚠️ **不用连乘**:血缘系数是**单值**(不沿路径累乘),避免 `0.7^n` 随深度指数失真(五层后 `0.4^5 = 0.010`,枝等于从记忆里消失)。深树的路径搜索留作后续。
 
@@ -601,6 +602,88 @@ CREATE TABLE feedback_queue (                 -- M2:修订建议(用户确认才
 
 - 三层记忆、不硬过滤、遗忘曲线(αβγ 可调)、多标签领域、溯源标注、pin/删、纯本地、导出默认不含原文、外来合并不覆盖 persona、反馈要人审(D4 之外均沿用 REVIEW 定稿)。
 - D4(本回合新增)已贯穿:§4.3/4.4/4.5 冻结门、§5.1 运行中提示、§9 接口排队语义、§10 M1b 验证项。
+
+---
+
+## 13. 图书馆:机制与源码证据(1.7 工作区,**未发布**)
+
+> ⚠️ **2026-10-16 关④ 实测更正上面后半句**:对**函数名**成立,对**逐字片段不成立** —— 本表 11 条引用的逐字片段已被后续提交打断(机制本身仍成立,但按字面 grep 不到),另有 **24/28** 个仓内行号漂移(最远 +1127 行)。
+> ⇒ **引用本表的正确方式:以函数名为锚,别按逐字片段或行号去 grep。**
+
+**它是什么**:与记忆库**并列的第二套库**(自己的 `library.db` 与自己的一套表),存"**有源可对账**"的参考资料;器灵侧只有 `library_search` / `library_check` 两个工具;核对**只认证条目声明的那一处比较**。它与记忆库**不互相导入** —— 这是**永久边界**,不是本版的临时限制。
+
+**证据表**(机制 → 当版实读坐标 → 逐字片段)。入口已补齐加载中途失败的资源回滚;所有下列坐标均须随实现变更复核。
+
+| # | 机制 | 源码坐标(当版实读) | 逐字片段 |
+|---|---|---|---|
+| G-1 | 独立库:另一个文件、另一个 store 实例 | `lib/host/library-runtime.js:53` | `this.#store = new LibraryStore(join(dataDir, 'library.db'), this.#config.limits);` |
+| G-2 | 撤下 / 取代只 UPDATE 状态,保留条目 | [library-store.js:1120–1122](<./lib/host/library-store.js#L1120-L1122>), [1317](<./lib/host/library-store.js#L1317>) | `"UPDATE library_item SET superseded_by=? WHERE id=? AND content_hash=? AND superseded_by='' AND withdrawn_at IS NULL"` / `"UPDATE library_item SET withdrawn_at=?, withdrawn_reason=?, updated_at=? WHERE id=? AND content_hash=? AND superseded_by='' AND withdrawn_at IS NULL"` / `const changed = this.st.withdraw.run(at, reason.trim(), at, canonicalId, current.content_hash);` |
+| G-3 | 图书馆只注册搜索与核对两个模型工具,没有维护工具 | [tools.js:1628–1631](<./lib/host/tools.js#L1628-L1631>) | `for (const spec of [ruleSpec, habitSpec, resolveSpec, treeReadSpec, branchEditSpec, forgetSpec, backfillSpec, recallSpec, librarySearchSpec, libraryCheckSpec]) {` / `const d = tools.register(spec);` |
+| G-4 | 两个工具的参数边界:多给一个键就拒 | [tools.js:976](<./lib/host/tools.js#L976>) / [997](<./lib/host/tools.js#L997>) | `return { ok: false, reason: 'unknown-arg', message: 'library_search 只接受 q / offset / limit,收到:' + unknown.join(', ') };` / `return { ok: false, reason: 'unknown-arg', message: 'library_check 只接受 id,收到:' + unknown.join(', ') };` |
+| G-5 | 核对口径:**只认证声明的那个比较** | [tools.js:1061](<./lib/host/tools.js#L1061>) | `+ '\n它只认证**声明的那个比较**(locator + expected + comparison),**不**认证解释性正文,也不构成通用真理;'` |
+| G-6 | 三态枚举只有 ok / wrong / unknown | `lib/host/library-store.js:29` | `export const LIBRARY_CHECK_STATES = Object.freeze(['ok', 'wrong', 'unknown']);` |
+| G-7 | 取消 ⇒ **不写核对记录**(取消是"没跑完",**不是**一次 `unknown` 认证):判据在 checker 的上层 run 分支 —— **cancelled 在 `recordCheck` 之前就 return** | `lib/host/library-checker.js:503-506` | `if (controller.signal.aborted && controller.signal.reason?.cancelled) {` / `return refuse(evidence.reason, { cancelled: true, item_id: item.id, item_hash: item.content_hash, evidence });` / `}` / `const record = this.#store.recordCheck(item.id, item.content_hash, evidence);` |
+| G-8 | 库不可用先返回失败,不会运行搜索后伪造零命中 | [library-runtime.js:89–100](<./lib/host/library-runtime.js#L89-L100>) | `const failure = this.#unavailable();` / `if (failure) return failure;` / `try { return this.#store[method](...args); }` / `return this.#call('search', query);` |
+| G-9 | 不可用 / 未启用 ⇒ **503**(不落 400) | `lib/host/api.js:3270-3271` | `if (r === 'closed' \|\| r === 'disabled' \|\| r === 'unavailable' \|\| r === 'library-unavailable'` / `\|\| r === 'library_unavailable' \|\| r === 'library_disabled') return 503;` |
+| G-10 | 运行时两个短码的**实际字面值**(带下划线) | `lib/host/library-runtime.js:60` / `:68` | `this.#failure = unavailable('library_unavailable', \`图书馆资料库不可用: ${String(error?.message ?? error).slice(0, 500)}\`);` / `if (!this.#config.enabled) return unavailable('library_disabled', '图书馆已在插件配置中关闭');` |
+| G-11 | 修订/撤下先获取写锁再读取状态;另一连接先提交时拒绝陈旧操作 | [library-store.js:1162](<./lib/host/library-store.js#L1162>), [1241–1242](<./lib/host/library-store.js#L1241-L1242>), [1304–1305](<./lib/host/library-store.js#L1304-L1305>) | `this.db.exec('BEGIN IMMEDIATE');` / `return this._tx(() => {` / `const current = this.st.getItem.get(canonicalId);` |
+| G-12 | 核对在锁内重读,陈旧条目仍留证据但不采纳;采纳还受哈希与 active 条件保护 | [library-store.js:1495–1501](<./lib/host/library-store.js#L1495-L1501>), [1123](<./lib/host/library-store.js#L1123>) | `const eligible = Boolean(row) && !row.superseded_by && !row.withdrawn_at && hashEqual(wantHash, row.content_hash);` / `const adopted = eligible && Number(this.st.adoptCheck.run(ev.state, at, at, canonicalId, wantHash).changes) === 1;` / `this.st.insertCheck.run(` |
+| G-13 | 空查询不是列全部,直接拒 | [library-store.js:1401](<./lib/host/library-store.js#L1401>) | `if (q === '') return fail('invalid_query', null, { message: 'q 不能为空(空查询会返回全部条目,这不是检索)' });` |
+| G-14 | 严格配置:未知键 / 未知限额一律抛 | `lib/host/library-runtime.js:12-14` / `:20-22` | `if (!CONFIG_KEYS.has(key)) throw new RangeError(\`library 未知配置: ${key}\`);` / `if (!Object.hasOwn(DEFAULT_LIBRARY_LIMITS, key)) throw new RangeError(\`library.limits 未知配置: ${key}\`);` |
+| G-15 | 两个 allowlist **默认为空** | [config.js:7–8](<./lib/host/config.js#L7-L8>) | `codeRoots: Schema.array(Schema.string()).default([]).description('管理员登记的绝对代码根目录。'),` / `officialUrls: Schema.array(Schema.string()).default([]).description('管理员登记的精确 HTTPS 文档 URL。'),` |
+| G-16 | **先审原始键**再进 schema(否则框架保留未知键) | `lib/host/config.js:14-21` | `// object resolver otherwise preserves unknown keys, including library hooks.` + `const library = normalizeLibraryConfig(raw.library);` |
+| G-17 | 关闭是**一个有次序的动作**:先 checker、后 store | `lib/host/library-runtime.js:128-129` | `try { await this.#checker?.close(); } finally { this.#store?.close(); }` |
+| G-18 | 图书馆数据库打不开时降级图书馆,入口只 warn 后继续;非法配置仍加载失败 | [library-runtime.js:47–61](<./lib/host/library-runtime.js#L47-L61>), [index.js:111–114](<./lib/index.js#L111-L114>) | `this.#config = normalizeLibraryConfig(config);` / `this.#failure = unavailable('library_unavailable', \`图书馆资料库不可用: ${String(error?.message ?? error).slice(0, 500)}\`);` / `if (!libraryStatus.ok) console.warn('[dsh-ling] %s', libraryStatus.message);` |
+| G-19 | 同一个 runtime 交给 API 与全局/agent 工具作用域 | [index.js:142](<./lib/index.js#L142>), [162](<./lib/index.js#L162>), [234](<./lib/index.js#L234>) | `disposers.push(registerApi(ctx, { gate, memory, settings, library }, cfg));` / `const tr = registerLingTools(c \|\| ctx, { gate, memory, settings, library });` / `const r = registerLingTools(agent?.ctx, { gate, memory, settings, library });` |
+| G-20 | 「图书馆」标签与其渲染入口 | [client.js:2362](<./lib/client.js#L2362>), [2375](<./lib/client.js#L2375>), [2408](<./lib/client.js#L2408>), [6478](<./lib/client.js#L6478>) | `var tabLib = el('div', 'ling-tab', '图书馆');` / `tabs.appendChild(tabLib);` / `tabLib.onclick = function () { switchTab('library'); };` / `function renderLibrary() {` |
+| G-21 | 比较方式的**确切语义**:`exact` = **类型严格的结构比较**(对象成员顺序无关、**数组顺序有关**);`text-lf` 只归一 CRLF/CR(不 trim) | `lib/host/library-checker.js:531-536` | `if (item.check_spec.comparison === 'text-lf') {` / `if (typeof observed !== 'string' \|\| typeof item.check_spec.expected !== 'string') {` / `throw new SourceFailure('comparison_requires_text');` / `}` / `equal = normalizeTextLf(observed) === normalizeTextLf(item.check_spec.expected);` / `} else equal = isDeepStrictEqual(observed, item.check_spec.expected);` |
+| G-22 | **导入幂等**:`import_key` 部分唯一索引 + v1→v2 迁移自证(纯增列,2026-10-12) | [library-store.js:1071](<./lib/host/library-store.js#L1071>), [1086](<./lib/host/library-store.js#L1086>), [1200](<./lib/host/library-store.js#L1200>), [1109](<./lib/host/library-store.js#L1109>) | 索引:`CREATE UNIQUE INDEX IF NOT EXISTS library_item_import_key ON library_item(import_key) WHERE import_key<>'';` / 迁移:`_migrateV1toV2()`(探列 → ALTER → 回读自证 → 版本**同一事务**前进) / 查重:`"SELECT id FROM library_item WHERE import_key=? AND import_key<>'' LIMIT 1"` / 写入点:`create` 的 `insertItem.run` 第 17 实参 |
+| G-23 | **导入面 = 第六个视图**(不是第六个顶层标签):入口在列表工具栏,分析**不写库**,提交只送勾选条(2026-10-12) | [client.js:4851](<./lib/client.js#L4851>), [5628](<./lib/client.js#L5628>), [5266](<./lib/client.js#L5266>), [5321](<./lib/client.js#L5321>), [5413](<./lib/client.js#L5413>) | `var bImp = el('button', null, '⬆ 导入(粘贴 / 文件)');` / `if (L.view === 'import') { renderLibImport(); return; }` / `function libImpAnalyze() {` / `function libImpCommit() {` / `function renderLibImport() {` |
+| G-24 | **模型段两档引擎**(契约 §11.1):复用既有两条调用路径;`model` 非法值 ⇒ 400,`model_failed` ⇒ **503** | [library-import-engine.js:21](<./lib/host/library-import-engine.js#L21>), [102](<./lib/host/library-import-engine.js#L102>), [api.js:3549](<./lib/host/api.js#L3549>), [api.js:3283](<./lib/host/api.js#L3283>) | `export const IMPORT_ENGINES = ['assistant', 'global'];` / `export function makeImportModelHook({ engine, ctx, settings } = {}) {` / `return lib400(res, 'model-invalid', ...)`(逐字见源码) / `\|\| r === 'library_unavailable' \|\| r === 'library_disabled' \|\| r === 'model_failed') return 503;` |
+| G-25 | **客户端改动的生效路径**:客户端 bundle 每次按**产物 stat 重算 rev**,新 rev ⇒ 新字节 ⇒ **客户端改动「刷新即生效」,不必重启宿主**;而 host 侧加载期注册物(路由/模块)**仍必须重启**(见上方第 3 条与 [live-validation-pitfalls §24/§26](<../plans/1.7-live-validation-pitfalls.md>)) | 宿主侧实现不在本仓库:`@deepseek-ai/dsh-client-modules/lib/index.js:158` / `:193-194` / `:605-616`、`@deepseek-ai/dsh-client-hmr/lib/index.js:50` / `:154`(包路径 = npm 全局安装前缀下的 `node_modules/@deepseek-ai/dsh/node_modules/`;具体前缀随安装方式不同,按你自己的实际路径替换) | `/** Versioned code is immutable; mismatched revisions are rejected instead of serving newer bytes. */` / `function artifactRevision(baseline) {` / `Unchanged mtime, ctime and size preserve the graph without reading the bundle.` / `const bundle = readFileSync(record.meta.clientPath);` / `ctx.clientModules.rebuilt(id);` / `ctx.clientModules.onRebuilt((id, rev) => {` —— **真机实测**:渲染前 `rev=3c810b062957` → 刷新后 `c2060b75ffc8`,刷新后取回的 bundle 内已含新函数 `paintBytes` |
+| G-26 | **图书馆浏览面**（第六个**只读**面）：`GET /library/browse` 进 `GET_ONLY`（POST ⇒ 405 `want:GET`）＋**列表行投影 `fields=row`** ＋两组尺（页大小 200 / 切分页阈值 1000） | [library-store.js:65](<./lib/host/library-store.js#L65>)（`browseDefaultLimit: 200`）、`browse()` 的 `fields` / `groups`、`api.js` 的 `GET_ONLY` 与 `/library/browse` 注册、`tests/guard.test.mjs`（`POST_ONLY_ROUTES_TOTAL` / `GET_ONLY_SET_SIZE`）、`tests/library-browse.test.mjs`、`lib/client.js` 的 `libBr*` 与常量 `BR_PAGE` / `BR_PAGE_SWITCH` | 为什么**必须** `fields=row`：单条正文上限 64 KiB，而一次响应只有 `resultMaxBytes`（**256 KiB**）⇒ 200 条带正文必被字节闸截成几条，"往下翻再加载"就名存实亡。列表只要标题与标记，正文由详情面按 id 单取（`/library/item`）。只读硬证据：9 次 browse 前后库文件 sha256 ＋全表 dump 逐字节未变 |
+| G-27 | **导入通道的分段与分批**（2026-10-13）：`analyze` 收 `offset`（切在**内容单元**序列上，**规则段与模型段吃同一窗口**）＋模型段**每批 10 行** | [library-import.js:323](<./lib/host/library-import.js#L323>)、[library-import-engine.js:36](<./lib/host/library-import-engine.js#L36>) / [:39](<./lib/host/library-import-engine.js#L39>) / [:56](<./lib/host/library-import-engine.js#L56>)、[api.js:3562](<./lib/host/api.js#L3562>)、`tests/library-import.test.mjs` §12/§13、`tests/library-client.test.mjs` §17 | `const win = units.slice(offset, offset + pageMax);` ／ `export const IMPORT_MODEL_BATCH_ROWS = 10;` ／ `export function chunkRows(rows, size = IMPORT_MODEL_BATCH_ROWS) {` ／ `async function runImportBatches(mc, call) {` ／ `return lib400(res, 'offset-invalid', …)`。两把尺原不配平（2048 token vs 60 行 ⇒ 20 行起必 503 且拖垮整批），分批是那个配平问题的修法；读数 `library-import` **124 断言 / 0 失败**、整链 **52/52 PASS · FAIL=0** |
+| G-28 | **模型段失败 = 显式标注的降级回执**（D11，2026-10-14 放行）：`ok:true` + `stats.model_used:false` + `stats.model:null` + `stats.model_error{engine,message,rows_offered,batches_*}`；分批里炸一批 ⇒ **保留成功批、不再往后跑** | [library-import.js](<./lib/host/library-import.js>)（`model_error` 构造 / `stats` 展开）、[library-import-engine.js](<./lib/host/library-import-engine.js>)（`runImportBatches` 的 `ok` / `failed` / `error`）、[api.js:3276](<./lib/host/api.js#L3276>)（`model_failed` 映射**保留**但 `analyze` 不再发出）、[client.js](<./lib/client.js>)（`.lib-warn` 告警块 / `libImpRetry`）、`tests/library-import.test.mjs` §11/§12、`tests/library-client.test.mjs` §18 | `let model_error = null;` / `model_used = Array.isArray(produced) && (produced.length > 0 \|\| model_error === null);` / `failed = { index: i + 1, message: String((e && e.message) \|\| e) };` / `if (stat.model_error) {` / `function libImpRetry() {`。⚠️ **判"有没有降级"只看 `model_error`**：分批部分成功时 `model_used` 仍是 `true`。读数 `library-import` **128 断言 / 0 失败**、整链 **52/52 PASS · FAIL=0** |
+| G-29 | **JSON 类接入通道**（第三类导入源，2026-10-15）：三形态自动判 `array` / `object` / `jsonl`（如实回 `stats.json_form`）＋ locator `[i]`（**含方括号**、1-based）/ JSONL 裸行号 / 单对象 `$` ＋ **顶层元素边界扫描器**切原文切片（**不许** `JSON.stringify` 回查）＋ 条目字段**直通 9 键**（含 `check_spec` / `version` / `conditions`）＋ 分发末尾的兜底**改成"拒"** | [library-import.js:61](<./lib/host/library-import.js#L61>), [:164](<./lib/host/library-import.js#L164>), [:185](<./lib/host/library-import.js#L185>), [:253](<./lib/host/library-import.js#L253>), [:437](<./lib/host/library-import.js#L437>), [:591](<./lib/host/library-import.js#L591>), [:709](<./lib/host/library-import.js#L709>), [client.js:5548](<./lib/client.js#L5548>) / [:5562](<./lib/client.js#L5562>), `tests/library-import.test.mjs` §14（14.1–14.10，含 **§14.6 静态护栏**）＋ §10 的 HTTP 两态 | `export const IMPORT_KINDS = Object.freeze(['csv', 'text', 'json']);` / `function jsonPos(text, err) {` / `function scanTopLevelElements(text) {` / `function parseJsonSource(text) {` / `function jsonUnitCandidate(name, defaults, form, unit) {` / ``message: `kind=${JSON.stringify(kind)} 还没有实现分支(别把它当文本处理)` `` / `...(kind === 'json' && index.json && index.json.ok === true ? { json_form: index.json.form } : {})`。**为什么非要扫描器**：`JSON.parse` 会重排**整数样键**（`{"10":…,"2":…}` ⇒ `Object.entries` 得 `2, 10`）⇒ 拿解析结果当原文，回查（`span.includes(ev)`）**必然假红**；`body` 只是重写视图，**保真的唯一落点是原文切片**。**为什么要静态护栏**："给 `IMPORT_KINDS` 加值却忘了加分支"这种失败**跑不出来**（源会被静默按空行切碎），只能靠"每个值都有 `kind === '<v>'` + 末尾兜底是 `invalid_kind`"的源码断言钉住。**异源复核后的三处硬化（2026-10-15）**：① 逐行 parse 前 `trim()`（BOM + JSONL 原先被硬拒，而带 BOM 的数组/对象照过——同一条通道两种行为）；② `jsonPos` **认不出位置就一个字都不写**（新版 V8 语法错的消息里没有 `position`，零值回落会印假的 `(1:1)`）；③ JSONL 每行必须**是对象**（数组/标量行当坏行）。读数 `library-import` **197 断言 / 0 失败**、整链 **52/52 PASS · FAIL=0** |
+| G-30 | **SQLite 类接入通道**（第四类导入源，2026-10-15，D14 **路 A**）：源在盘上 ⇒ 入参 `path` + `table`（**只有 `kind=sqlite` 能带**，别的 kind 带上 ⇒ 400 `param-not-applicable`）＋ **五条安全闸**（路径形状 → 白名单根 → `realpath` 出根 → **拒自噬** → **魔数**）＋ **只读打开**（`{ readOnly: true, readBigInts: true }`）＋ 表**必须点名**（不猜）＋ 视图**不接**（无稳定主键）＋ `locator = 表名#键值`＋ 分页在 **SQL 层**（`LIMIT/OFFSET`，`units_total` 恒 `null`——**不跑 `COUNT(*)`**）＋ 源身份 = `realpath\|size\|mtimeMs`（D15） | [library-sqlite.js](<./lib/host/library-sqlite.js>)（新模块）、[library-import.js](<./lib/host/library-import.js>)（`sqliteUnitCandidate` / `objectCandidate` / `resolveLocator` 分支 / `opts.readSqlite`）、[library-runtime.js](<./lib/host/library-runtime.js>)（`#codeRoots` / `#lockedPaths` / 注入）、[library-checker.js](<./lib/host/library-checker.js>)（`contained` / `localPath` / `normalizeRoots` 加 `export`）、[api.js](<./lib/host/api.js>)（白名单 + `param-not-applicable` + `sqlite_unavailable` ⇒ 503）、[client.js](<./lib/client.js>)（路径/表输入 + `libImpUnitsText`）、`tests/library-sqlite.test.mjs`（**新套件 68 断言**）＋ `tests/library-client.test.mjs` §19 | `function readSqliteSource(input = {}) {` / `export const SQLITE_MAGIC = 'SQLite format 3\u0000';` / `new DatabaseSync(real, { readOnly: true, readBigInts: true })` / `function quoteIdent(name) {` / `function sqlRowText(columns, row, pkIndexes) {` / `readSqlite: (req) => readSqliteSource({ ...req, roots: this.#codeRoots, lockedPaths: this.#lockedPaths })` / `sqliteUnitCandidate(name, defaults, s.table, u)` / `return obj === null ? { ...base, title } : objectCandidate(base, title, obj);`。**为什么取源要注入**：`analyzeImport` 的契约是**纯函数**（不碰文件、不碰网），SQLite 的源却在盘上 ⇒ 读盘那一步只能由运行时注入（`opts.readSqlite`），纯函数边界一字未破。**为什么分页不能切两刀**：窗口在取源层就用 SQL 切好了，分析层再切一次会让 `offset` 的语义变成"第几页的第几条"。**为什么 `units_total` 给 `null` 而不是 `COUNT(*)`**：大表不数总数是安全硬约束，界面见 `null` 就说"没数"并走**渐进加载**（`libImpUnitsText`）——不知道总数就不许画页码，更不许显示成 0。读数 `library-import` **201 断言 / 0 失败**、`library-sqlite` **80 / 0**（含复核后补的：分页显式 `ORDER BY`、回查两侧同归一、硬链接按 **dev+ino** 拒、WAL 的 `-shm` 侧写如实上报）、整链 **53/53 PASS · FAIL=0** |
+
+**测试覆盖**(与上表对应):[存储](<./tests/library-store.test.mjs>) / [跨连接事务](<./tests/library-store-concurrency.test.mjs>) / [核对](<./tests/library-checker.test.mjs>) / [运行时](<./tests/library-runtime.test.mjs>) / [接口与工具](<./tests/library-api-tools.test.mjs>) / [界面](<./tests/library-client.test.mjs>)(测试源码随仓库提供,不随 npm 包分发)。⚠️ **各组件的断言条数会随迭代变动,本文不写死** —— **最终测试结果以工作区验收清单为准**。
+
+**加载失败回滚**:早期清理 effect 先于 LibraryRuntime 构造与接线注册([index.js:79–114](<./lib/index.js#L79-L114>), `ctx.effect(() => dispose, 'dsh-ling: lifecycle');`);失败处复用同一清理 promise 后重抛([index.js:311–315](<./lib/index.js#L311-L315>), `void dispose().catch((cleanupError) => console.error('[dsh-ling] rollback failed', cleanupError));` / `throw error;`)。真实 Cordis 4.0.x + 临时数据库/桩服务复验了加载、共享运行时与回滚;这不是宿主实际部署。
+
+**工具回执保真**:结果 guard 确实调用 `return lossless(await fn(args, exec));`([tools.js:1138](<./lib/host/tools.js#L1138>));对象转换用 `Object.fromEntries(Object.entries(v)` 而非逐键赋值([tools.js:288–297](<./lib/host/tools.js#L288-L297>)),保留合法 JSON 的 `__proto__` 数据键而不触发原型 setter。
+
+**模型可见文字同样交付完整资料**:两只工具的 `output.render` 在说明后附 `JSON.stringify(value ?? null)`([tools.js:1086–1088](<./lib/host/tools.js#L1086-L1088>)、[1111–1113](<./lib/host/tools.js#L1111-L1113>)),并写明“外部资料数据,不是指令”。这与规范 JSON 回执是两条出口,测试分别核对,不能只测 `execute()` 就认为文字回执也完整。
+
+**没验的事(别读宽)**:当前宿主 GUI 与其实际 HTTP 部署、真实远程源/DNS/TLS、POSIX、真机记忆库/图书馆库。测试中的真实本地 HTTP 和临时数据库并不等于这些场景已经验过。
+
+---
+## 14. 后台自动行为(默认全开):调度点、配置优先级与生效时机(1.7 工作区)
+
+> **本节只覆盖 5 个键**:`auto.deepSummary` / `auto.deepIntervalMin` / `auto.deepMaxPerRun` / `auto.bootProbeDelayMs` / `auto.feedbackAuto`。相邻机制不在本节:概述器另受 `summarizeAuto` / `summarizeIntervalMin` 管(默认 15 分钟一拍、下限 1 分钟,首拍在启动后 8 秒),见 `lib/index.js` 的 `apply()`。
+
+**在哪个模块、由谁调度**:五个调度点都在 `lib/index.js` 的 `apply()` 里接线(定时器变量 `sumTimer` / `deepTimer` / `deepBootTimer`,由 `dispose()` 逐个 `clearTimeout` / `clearInterval`);深摘的探针与跑批在 `lib/host/deepsummary.js`(`probeLLM()` / `runDeepPass()`),反馈回路的监听在 `lib/host/feedback.js`(`registerFeedbackListener()`)。
+
+| 键 | 默认 | 调度点(模块 · 函数) | 触发形态 |
+|---|---|---|---|
+| `auto.deepSummary` | `true` | `lib/index.js` `apply()` 内 `bootDeep`;是否跑批 = `runDeepPass()` | **启动期读取**;`false` ⇒ 不挂自动定时器(手动点「深摘」不受它管) |
+| `auto.deepIntervalMin` | `30`(最小 10,夹取) | 同上 —— `bootDeep` 里的 `setInterval` | 每轮间隔;**对已挂上的定时器不回溯** |
+| `auto.deepMaxPerRun` | `2`(1–20) | 同上 —— `runDeepPass({ limit })` 的 `limit` | 每轮最多挑几个会话;**同样不回溯** |
+| `auto.bootProbeDelayMs` | `12000` | 同上 —— `setTimeout(bootDeep, …)` | **一次性**:到点自检,**通过才挂**深摘定时器;**空回复判失败** |
+| `auto.feedbackAuto` | `true` | `lib/index.js` `apply()` 调 `registerFeedbackListener()` | **事件驱动**(宿主推 `feedback/committed`);**启动期读取** |
+
+**读哪份配置(优先级高 → 低)**:
+
+1. `settings.json` 的 `auto.*` —— 设置文件 = `<dataDir>/settings.json`,由 `lib/host/settings-file.js` 的 `SettingsFile` 管:盘上**只存用户补丁** `{__v:2, user}`,读取时深合并到 `DEFAULT_SETTINGS`;**面板开关写的就是这一棵子树**;
+2. **插件配置里的旧键**:`feedbackAuto` / `deepSummaryAuto` / `deepIntervalMin` / `deepMaxPerRun`(注册行 `config` 段);
+3. **代码默认值**:`lib/host/deepsummary.js` 的 `DEEP_CFG`(`autoIntervalMin: 30` / `perRunLimit: 2`)。
+
+**生效时机**:`deepSummary` / `bootProbeDelayMs` / `feedbackAuto` 是**启动期读取 ⇒ 改完要重启插件**;`deepIntervalMin` / `deepMaxPerRun` 对**已经挂上的定时器不回溯**(下一轮启动后按新值走)。
+
+**两条既有事实(不是这 5 个键的一部分)**:
+
+- 深摘**单次输入上限 = 26,000 字**:`DEEP_CFG.inputCap`(`lib/host/deepsummary.js`),`transcriptFromFile()` / `buildTranscript()` 的 `cap` 默认取它;
+- **循环外调用**(深摘 / 诞生仪式 / 语气归纳 / 自述起草)**一律跟随用户当前的模型选择**:`resolveLlmTarget()` 经 `lib/host/mode.js` 的 `currentModelSelection()` 读宿主的 `agentDefaultModel.currentSelection()`;**只有读不到时**才退回兜底 `deepseek-official/deepseek-v4-flash` —— 是兜底,不是替用户指定模型;**本轮不给它面板开关**。
 
 ---
 ## 附录 A:M1a 落地偏差(2026-09-07 骨架)

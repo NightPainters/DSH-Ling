@@ -152,9 +152,36 @@ export const REQUIRED = [
 //   · 其余 4 处维持原判:client.js 的 api×2 / exportMemory(本地面板 API,同源回环)
 //     + dsweb-summary.js 的 probeAssistant / summarizeLocal(地址由 baseUrl 参数给出:
 //     settings.assistant → 环境变量 → 内置 loopback http://127.0.0.1:11434/v1,三级覆盖见 resolveAssistant)。
+//
+// 2026-10-16 基线 6 → 23 的依据(**先把新增的 17 处逐处定性完,再改基线**;逐处结论:无一处"绕过防护往外发")。
+// 账:原 6 处(本地面板 API ×4 + 用户自配 baseUrl ×2)+ 新增 17 处(图书馆远程核对 2 + 测试桩 15)= **23**。
+// ⚠️ 本段按本文件房式**把模式串写成带 `·` 的形态**(见上面 `re()` 的用法)——否则判据会扫到自己("判据文件自命中也算红")。
+//   · 新增 2 处在**库内**(`lib/host/library-checker.js` 顶层两行:import `no·de:https` / `no·de:net`)——
+//     即本版新特性「图书馆远程核对」。真正的请求调用点不在顶层、也不匹配本判据的正则(它用解构出来的
+//     `request` 绑定发请求),所以该文件只在这两行上命中。定性:出站目标**只认管理员登记的
+//     `officialUrls` 白名单**(默认空数组 ⇒ 不登记就一处也发不出去),且同一文件内已实现
+//     私网拒(IP / localhost / *.local / *.internal)+ **DNS 解析结果与连接后 `remoteAddress` 二次校验**
+//     + 拒绝跳转 + 不带凭据 ⇒ 属"防护已实现之后的**有意**出站面",不是悄悄外发。`no·de:net` 用于私网判定。
+//   · 新增 15 处在 **tests/** 三个文件(库内替身用 `un·dici` / 相对 URL 的 fetch / `https·.req·uest`
+//     造应答与造假传输层,离线不出网):`library-api-tools.test.mjs`(6)· `library-checker.test.mjs`(8,
+//     含 `stubStore` 7 处)· `library-import.test.mjs`(1)。测试**不进 npm 包**(`files` 里没有 `tests/`)。
+//   · 另修本判据自己的一个 bug:`enclosingFn` 顶层命中原返回 `null`,而报告侧把 `null` 显示成 `(顶层)`
+//     ⇒ 显示与判定不一致、写进白名单的 `'(顶层)'` 永远匹配不上;现在两侧共用 `TOP_FN`。
+//
+// 2026-10-16 基线 23 → 25 的依据(**同样先逐处定性,再改基线**;逐处结论:两处都是本机离线替身)。
+// 账:原 23 处 + 新增 2 处(`tests/auto-config.test.mjs` 的 `/auto` HTTP 回归段)= **25**。
+//   · ① :167 —— 注释里**提到**连接池库的名字(不是调用点;它下面那半句才是实测坑本身:
+//     "必须先 `closeAllConnections()` 再 close,否则 close 的回调永远不来");
+//   · ② :176 —— `callAuto` 里对本机临时端口发的一次请求;那个服务由同文件的 `wireAuto` 用
+//     `listen(0, '127.0.0.1')` 起,`base` 由 `server.address().port` 现场拼出 ⇒ **目标里没有
+//     任何上游/第三方固定域名**(离线不出网)。两处都是"造应答"用的替身,与上面三个 tests/ 条目同类;
+//     测试不进 npm 包(`files` 里没有 `tests/`)。
+//   · 归属函数这次写成具名 `function` **声明**(`wireAuto` / `callAuto`),白名单按名字收,**不写 `(顶层)`**:
+//     同族文件此前只能写 `(顶层)`,是因为它们的替身都藏在箭头函数体里(`enclosingFn` 只认
+//     `function NAME` 声明);写名字换来的是"本文件将来多出的**顶层**出站调用仍要报红"。
 export const OUTBOUND = {
   re: re('fe·tch\\(|no·de:https|no·de:net|ax·ios|un·dici|new ·WebSocket|Event·Source|XMLHttp·Request|https?\\.req·uest'),
-  baseline: 6,
+  baseline: 25,
   whitelist: [
     {
       file: 'lib/client.js',
@@ -168,6 +195,36 @@ export const OUTBOUND = {
       fn: ['probeAssistant', 'summarizeLocal'],
       why: '用户自配 provider:地址由 baseUrl 参数给出(settings.assistant → 环境变量 → 内置 loopback)',
     },
+    {
+      file: 'lib/host/library-checker.js',
+      // 2026-10-16 加:本文件只在**顶层两行 import** 上命中(`no·de:https` / `no·de:net`),
+      // 真正的请求调用点用解构出来的 `request` 绑定,不匹配正则。
+      fn: ['(顶层)'],
+      why: '图书馆远程核对:目标只认管理员登记的白名单(默认空 ⇒ 不登记一处也发不出),同文件已做私网拒 / DNS+remoteAddress 二次校验 / 拒跳转 / 无凭据',
+    },
+    {
+      file: 'tests/library-api-tools.test.mjs',
+      fn: ['(顶层)'],
+      why: '测试桩:用 `un·dici` / 相对 URL 的 fetch 造应答(离线不出网);测试不进 npm 包',
+    },
+    {
+      file: 'tests/library-checker.test.mjs',
+      fn: ['(顶层)', 'stubStore'],
+      why: '测试桩:刻意替换传输层来测核对三态 / 超时 / 私网拒(离线不出网)',
+    },
+    {
+      file: 'tests/library-import.test.mjs',
+      fn: ['(顶层)'],
+      why: '测试桩:同上(离线不出网)',
+    },
+    {
+      file: 'tests/auto-config.test.mjs',
+      // 2026-10-16 加,逐处定性见上面 23 → 25 那一段:两处一处在 `wireAuto`(注释提到连接池库名,
+      // 不是调用点),一处在 `callAuto`(对 `listen(0, '127.0.0.1')` 临时服务发的请求)。
+      // 收名字而不是 `(顶层)`:让本文件**顶层**多出来的出站调用照旧报红。
+      fn: ['wireAuto', 'callAuto'],
+      why: '测试桩:起本机 127.0.0.1 的 listen(0) 临时服务,再自己打这个替身(离线不出网);测试不进 npm 包',
+    },
   ],
 };
 
@@ -177,13 +234,18 @@ const lineAt = (text, index) => String(text).slice(0, index).split('\n').length;
 /** 树内相对路径(正斜杠)是否命中判据里的 file(允许带目录前缀)。 */
 const fileMatches = (name, file) => name === file || String(name).endsWith('/' + file);
 
-/** 取第 idx 行(0 基)往上最近的函数声明名 —— 出站调用的"归属函数"(白名单靠它,而不是行号)。 */
+/** 取第 idx 行(0 基)往上最近的函数声明名 —— 出站调用的"归属函数"(白名单靠它,而不是行号)。
+ *  找不到函数声明(顶层 import / 顶层调用)时返回**同一个常量**,不再返回 `null`:
+ *  2026-10-16 修 —— 此前返回 `null`,而报告侧把 `null` 显示成 `(顶层)` ⇒ **显示与判定不一致**:
+ *  白名单里写 `'(顶层)'` 永远匹配不上(`null ≠ '(顶层)'`),于是"看得出来、却白名单不掉"。
+ *  现在扫描侧与显示侧共用 `TOP_FN`,写进白名单的 `'(顶层)'` 才真的生效。 */
+const TOP_FN = '(顶层)';
 function enclosingFn(lines, idx) {
   for (let i = idx; i >= 0; i -= 1) {
     const m = lines[i].match(/^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/);
     if (m) return m[1];
   }
-  return null;
+  return TOP_FN;
 }
 
 function scanOutbound(name, text) {
