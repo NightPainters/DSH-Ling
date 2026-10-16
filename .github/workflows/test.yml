@@ -43,11 +43,21 @@ jobs:
         with:
           node-version: '24.x'
 
-      # 本包当前没有依赖(无不带 devDependencies 的 lockfile 时跳过安装),
-      # 保留这一段是为了将来加依赖时不必再改 workflow。
-      - name: Install (only when a lockfile exists)
+      # ⚠️ 2026-10-17 修红:这一段原先写着"本包当前没有依赖" ⇒ **是假话**。
+      #   本包有 1 个真运行期依赖(`@deepseek-ai/schemastery`),而没有 lockfile ⇒
+      #   老写法等于**什么都不装**,CI 上 `lib/host/config.js` 一 import 就
+      #   `ERR_MODULE_NOT_FOUND` ⇒ `library-runtime` 与 `tool-remount` 两段红。
+      #   (本地全绿是因为开发机上给它接了 junction —— 典型的"本地绿 ≠ CI 绿"。)
+      #   现在:有 lockfile 走 `npm ci`;没有 lockfile 就**照 package.json 里声明的**运行期依赖装,
+      #   **不在 workflow 里另抄一份版本号** —— 与上面第 1 条纪律同源(清单/版本只有一处来源)。
+      - name: Install (lockfile → npm ci; otherwise the declared runtime deps)
         run: |
-          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else echo 'no lockfile -> no install'; fi
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            DEPS=$(node -e 'const p=require("./package.json");const d=Object.entries(p.dependencies||{});console.log(d.map(([k,v])=>k+"@"+v).join(" "))')
+            if [ -z "$DEPS" ]; then echo 'no runtime deps -> no install'; else echo "installing: $DEPS"; npm install --no-save --no-audit --no-fund $DEPS; fi
+          fi
 
       # ── 1. 从 package.json 取段清单(单一来源)─────────────────────────────
       - name: Extract test segments

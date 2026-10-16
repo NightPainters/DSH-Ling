@@ -16,7 +16,7 @@
 // ⚠️ HTTP 面(path/table 白名单、`param-not-applicable`)由 `library-api-tools.test.mjs` 覆盖,本套不重复。
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, linkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, linkSync, existsSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -91,8 +91,26 @@ section('§1 安全:路径 / 白名单根 / 拒自噬 / 表必须显式选 / 打
 
   const r4 = await ana({ ...SRC, path: libPath });
   check(r4.ok === false && r4.reason === 'source_locked', `指向本插件自己的库 ⇒ source_locked(实际 ${r4.reason})`);
+  // ★ 大小写等价**只在大小写不敏感的文件系统上成立** —— 判据不写 `process.platform`:
+  //   Windows / macOS 默认不敏感(两种写法是同一个文件 ⇒ 必须照样认出是自噬);
+  //   Linux 默认敏感(是两个不同路径 ⇒ 正确行为就是**白名单先拒** `source_path_not_allowed`);
+  //   而 Linux 也能挂不敏感的盘、macOS 也能挂敏感的盘 ⇒ **就地实测这台机器**,不猜平台。
+  //   ⚠️ 2026-10-17 CI 修红:原来这条断言在 Linux 上必红(实测报 `source_path_not_allowed`)——
+  //     那不是插件错,是测试把 Windows 的假设写死了(本地绿、CI 红)。
+  const caseInsensitive = (() => {
+    try {
+      const probe = join(tmp, 'CaseProbe.tmp');
+      writeFileSync(probe, 'x');
+      const same = existsSync(join(tmp, 'caseprobe.tmp'));
+      rmSync(probe, { force: true });
+      return same;
+    } catch { return false; }
+  })();
   const r5 = await ana({ ...SRC, path: libPath.toUpperCase() });
-  check(r5.ok === false && r5.reason === 'source_locked', `同上但大小写不同 ⇒ 照样认出(实际 ${r5.reason})`);
+  check(
+    r5.ok === false && r5.reason === (caseInsensitive ? 'source_locked' : 'source_path_not_allowed'),
+    `大小写不同的路径:本机文件系统${caseInsensitive ? '不敏感 ⇒ 期望 source_locked(认出是自噬)' : '敏感 ⇒ 期望 source_path_not_allowed(白名单先拒)'}(实际 ${r5.reason})`,
+  );
 
   const r6 = await ana({ ...SRC, path: junk });
   check(r6.ok === false && r6.reason === 'not_sqlite', `不是 SQLite 的文件 ⇒ not_sqlite(实际 ${r6.reason})`);
