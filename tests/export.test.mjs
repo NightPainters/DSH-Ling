@@ -1,4 +1,4 @@
-﻿// 导出/合并 v2 单元测试(概述/队列/建议/深快照/人格默认不覆盖)
+// 导出/合并 v2 单元测试(概述/队列/建议/深快照/人格默认不覆盖)
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
@@ -76,6 +76,28 @@ const r4 = b.importBundle(bundle2); // overwrite 默认 false
 check(r4.skipped === 3 && r4.added === 0, 'overwrite=false 时全部跳过,实际 ' + JSON.stringify(r4));
 check(b.overviewById('import', 'imp-1').title === '文件导入的会话', 'import 行同样受"不覆盖"保护');
 check(b.overviewById('dsh', 's1').title === '深摘会话', 'dsh 行同样受"不覆盖"保护');
+
+// 9) 1.7.1(审计 C1):整包原子 —— 中途逃出的异常必须整体回滚,不许留"一半已覆盖"的半截库
+{
+  const dirC = mkdtempSync(join(tmpdir(), 'ling-xc-'));
+  const c = new MemoryStore(join(dirC, 'm.db'));
+  const boom = {
+    format: 'dsh-ling-memory',
+    overviews: [{ conv_id: 'tx-1', source: 'dsh', title: '事务前的概述', overview_ok: true, summary: 's' }],
+    feedbackQueue: [{ session_id: 'tx-1', message_id: 'm1', rating: 'negative' }],
+  };
+  const realAddFeedback = c.addFeedback.bind(c);
+  c.addFeedback = () => { throw new Error('boom'); };
+  const rTx = c.importBundle(boom, { overwrite: true });
+  c.addFeedback = realAddFeedback;
+  check(rTx.errors === 1 && rTx.added === 0, '事务:异常时回执不谎报行数,实际 ' + JSON.stringify(rTx));
+  check(!c.overviewById('dsh', 'tx-1'), '事务:异常后概述必须回滚(不许半截导入)');
+  check(c.listFeedback({}).length === 0, '事务:异常后队列一条都不许留下');
+  // 成功路径不能被事务一起回滚
+  const okTx = c.importBundle(boom, { overwrite: true });
+  check(okTx.added === 1 && c.overviewById('dsh', 'tx-1')?.title === '事务前的概述', '事务:正常路径提交,实际 ' + JSON.stringify(okTx));
+  check(c.listFeedback({}).length === 1, '事务:正常路径队列写入');
+}
 
 console.log(ok ? '导出/合并 v2 全部通过 ✓' : '存在失败');
 process.exitCode = ok ? 0 : 1;

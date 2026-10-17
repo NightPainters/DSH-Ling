@@ -2882,4 +2882,196 @@ await section('§21 结论层:迟到回画守卫(作废在飞的旧请求 · 失
 
 console.log('    §19 断言点:SQLite 通道 —— 路径与表 / payload 形状 / 总数没数 / 换类型清账');
 
+// ─────────────────────────── §22 D2：手术票重试上限 ───────────────────────────
+// 背景(:169-192 + :207):surgeryTicket* 是 IIFE 外层闭包变量,整个页面生命周期共享;
+//   取票失败时解锁(surgeryTicketTried=false)并计次(surgeryTicketFailCount++);
+//   条件 `!surgeryTicketTried && surgeryTicketFailCount < 2` 把自动取票限在 2 次以内。
+//   surgeryTicket* 在 IIFE 作用域 ⇒ 每个子测试用独立 vm 上下文从零起步。
+//   /import/history 由「接入历史」标签里的 renderImportLog() 发出(:3947)。
+await section('§22 D2：手术票重试上限');
+{
+  async function mkIso() {
+    const ic = [];
+    let ir = () => ({ ok: true });
+    function ipathOf(rec) { return rec.url.replace('/api/dsh-ling', ''); }
+    const iDoc = {
+      createElement: (t) => new FakeEl(t),
+      createTextNode: (v) => new FakeText(v),
+      createStyleSheet: () => ({ cssRules: [] }),
+      documentElement: new FakeEl('html'),
+      head: new FakeEl('head'),
+      body: new FakeEl('body'),
+      getElementById(id) {
+        const all = allEls(iDoc.head).concat(allEls(iDoc.body));
+        return all.find((e) => e.id === id) || null;
+      },
+      querySelector(sel) { return walk(iDoc.body, sel, true)[0] || null; },
+      querySelectorAll(sel) { return walk(iDoc.body, sel, false); },
+      addEventListener() {}, removeEventListener() {},
+    };
+    iDoc.documentElement.setAttribute('data-theme', 'light');
+    const iWin = {
+      addEventListener() {}, removeEventListener() {},
+      innerHeight: 900, innerWidth: 1400,
+      confirm() { return true; },
+    };
+    function iStub(url, opts) {
+      const rec = {
+        url: String(url),
+        method: (opts && opts.method) || 'GET',
+        headers: (opts && opts.headers) || {},
+      };
+      ic.push(rec);
+      return Promise.resolve()
+        .then(() => ir(rec))
+        .then((p) => ({ ok: true, status: 200, json: async () => p }));
+    }
+    const iOut = await contextify(src, { window: iWin, document: iDoc, fetch: iStub });
+    return {
+      calls: ic,
+      setRespond(fn) { ir = fn; },
+      T: iOut && iOut.__test__,
+      doc: iDoc,
+      pathOf: ipathOf,
+      tcCalls() { return ic.filter((c) => ipathOf(c) === '/surgery/ticket'); },
+      ihCalls() { return ic.filter((c) => ipathOf(c) === '/import/history'); },
+    };
+  }
+  function openAccess(env) {
+    env.T.openMemoryCenter();
+    const mp = env.doc.body.querySelector('.ling-mc');
+    const tab = allEls(mp)
+      .filter((e) => String(e.className).split(/\s+/).includes('ling-tab'))
+      .find((e) => e.textContent.trim() === '接入历史');
+    if (tab) tab.onclick(mkEvent(tab));
+    return mp;
+  }
+  function refreshBtn(mp) {
+    return allEls(mp).find(
+      (e) => e.tagName === 'BUTTON' && e.textContent.trim() === '刷新'
+    ) || null;
+  }
+
+  // ── 子测试 A：成功分支 — 取到票后原样重发一次，重发请求带 x-dsh-ling-surgery ──
+  {
+    const env = await mkIso();
+    let ihHit = 0;
+    env.setRespond((rec) => {
+      const p = env.pathOf(rec);
+      if (p === '/surgery/ticket') return { ok: true, ticket: 'tok-d2' };
+      if (p === '/import/history') {
+        ihHit++;
+        return ihHit === 1 ? { ok: false, surgery: 'surgery-ticket' } : { ok: true, items: [] };
+      }
+      return { ok: true };
+    });
+    openAccess(env);
+    await settle(12);
+
+    eq(env.tcCalls().length, 1, '§22 A：票据只取一次');
+    eq(env.ihCalls().length, 2, '§22 A：/import/history 共调两次（原发+重发）');
+    const retried = env.ihCalls().filter((c) => c.headers && c.headers['x-dsh-ling-surgery']);
+    eq(retried.length, 1, '§22 A：重发那一次带 x-dsh-ling-surgery 头');
+    ok(retried[0] && retried[0].headers['x-dsh-ling-surgery'] === 'tok-d2',
+      '§22 A：头里的票据值与取到的一致');
+  }
+
+  // ── 子测试 B：失败分支 — 最多取 2 次票，第 3 次不再触发 ──
+  // 反证:去掉 :207 的 `&& surgeryTicketFailCount < 2` 后,第 3 次也会取票 ⇒ tcCalls().length === 3 ⇒ eq 变红。
+  {
+    const env2 = await mkIso();
+    env2.setRespond((rec) => {
+      const p = env2.pathOf(rec);
+      if (p === '/surgery/ticket') return { ok: false };
+      if (p === '/import/history') return { ok: false, surgery: 'surgery-ticket' };
+      return { ok: true };
+    });
+    const mp2 = openAccess(env2);
+    await settle(12);   // 自动那发 → 取票失败 → failCount=1
+
+    const rb = refreshBtn(mp2);
+    if (rb && typeof rb.onclick === 'function') rb.onclick(mkEvent(rb));
+    await settle(12);   // 第 2 次 → failCount=2
+
+    if (rb && typeof rb.onclick === 'function') rb.onclick(mkEvent(rb));
+    await settle(12);   // 第 3 次 → failCount<2 为 false → 不取票
+
+    eq(env2.tcCalls().length, 2, '§22 B：取票次数 === 2（上限，第 3 次手术请求不再触发）');
+    ok(env2.ihCalls().length >= 3, '§22 B：/import/history 确实发了 ≥3 次（只是不再触发取票）');
+  }
+}
+
+// ─────────────────────────── §23 F-06：导入日志迟到响应守卫 ───────────────────────────
+// 背景(:3927-3945):importLogSeq 是 renderAccess() 内的局部变量,每次切到「接入历史」都从 0 起步;
+//   renderImportLog() 每次调用 ++importLogSeq 得 token,回调里 token !== importLogSeq 即丢弃。
+//   /import/history 由「接入历史」标签里的 renderImportLog() 发出(:3947)。
+// 反证:删除 :3931 或 :3942 的 token 守卫后,迟到应答会写进新视图 ⇒ 断言变红。
+await section('§23 F-06：导入日志迟到响应守卫');
+{
+  // ── 子测试 A：旧应答后到 → 被丢弃，最终显示后发那次的数据 ──
+  {
+    const held1 = defer();
+    let ihCount1 = 0;
+    respond = (rec) => {
+      const p = pathOf(rec);
+      if (p === '/import/history') {
+        ihCount1++;
+        if (ihCount1 === 1) return held1.promise;   // 第一发(自动):挂在半空
+        return { ok: true, items: [{ line: 'F06新数据' }] };
+      }
+      return { ok: true };
+    };
+    openCenter();
+    await settle(2);
+    await clickTab('接入历史');
+    await settle(6);
+
+    // 找 import-log 的「刷新」按钮,点一次 → 第二发立刻拿到新数据(token=2)
+    const rb = allEls(panel).find(
+      (e) => e.tagName === 'BUTTON' && e.textContent.trim() === '刷新'
+    );
+    if (rb && typeof rb.onclick === 'function') rb.onclick(mkEvent(rb));
+    await settle(8);
+    ok(bodyText().includes('F06新数据'), '§23 A 前置：后发（新）那次数据已渲染');
+
+    // 放旧应答回来:token=1 !== importLogSeq=2 → 守卫拦截
+    held1.resolve({ ok: true, items: [{ line: 'F06旧数据' }] });
+    await settle(8);
+    ok(!bodyText().includes('F06旧数据'), '§23 A ★迟到的旧应答被丢弃（旧数据没有写进新视图）');
+    ok(bodyText().includes('F06新数据'), '§23 A ★迟到旧应答后新数据仍然在界面上');
+  }
+
+  // ── 子测试 B：旧请求失败的 catch 不写新视图 ──
+  {
+    const held2 = defer();
+    let ihCount2 = 0;
+    respond = (rec) => {
+      const p = pathOf(rec);
+      if (p === '/import/history') {
+        ihCount2++;
+        if (ihCount2 === 1) return held2.promise;   // 第一发(自动):挂在半空,稍后 reject
+        return { ok: true, items: [{ line: 'F06B新数据' }] };
+      }
+      return { ok: true };
+    };
+    openCenter();
+    await settle(2);
+    await clickTab('接入历史');
+    await settle(6);
+
+    const rb2 = allEls(panel).find(
+      (e) => e.tagName === 'BUTTON' && e.textContent.trim() === '刷新'
+    );
+    if (rb2 && typeof rb2.onclick === 'function') rb2.onclick(mkEvent(rb2));
+    await settle(8);
+    ok(bodyText().includes('F06B新数据'), '§23 B 前置：新数据已渲染（token=2）');
+
+    // 让旧请求以错误结束:token=1 ≠ importLogSeq=2 → catch 守卫拦截
+    held2.reject(new Error('网络错误'));
+    await settle(8);
+    ok(!/记录加载失败/.test(bodyText()), '§23 B ★旧请求失败的 catch 被守卫挡住（不写新视图）');
+    ok(bodyText().includes('F06B新数据'), '§23 B ★旧请求失败后新数据仍然在界面上');
+  }
+}
+
 summary();

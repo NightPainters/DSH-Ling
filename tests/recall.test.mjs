@@ -93,15 +93,30 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
 
 // 6) 真机(本机有会话目录才跑;没有就跳过 —— 别的机器上这套测试也应当能过)
 {
-  const map = listSessionFiles({ limit: 3 });
+  const map = listSessionFiles({ limit: 5 });
   if (map.ok && map.total > 0) {
-    check(map.sessions.length <= 3, 'map 应尊重 limit');
+    check(map.sessions.length <= 5, 'map 应尊重 limit');
     check(map.sessions.every((s) => s.conv && typeof s.bytes === 'number'), 'map 每项应有 conv/bytes');
-    const s = map.sessions[0];
-    const r = readSessionEvents(s.conv);
+    // ⚠️ 样本不能押在"此刻最新的那个会话"上(2026-10-17 实测):审计/并发子代理会造出
+    //   **只有注入轮、还没有 assistant 轮**的会话,它的 `firstVisible` 恒为 undefined ⇒
+    //   本套会随"此刻谁在跑"时红时绿(实测:同一份代码,A 夹具有 assistant 轮=绿、无=红)。
+    //   ⇒ 改为在最近 5 个会话里挑**第一个真有可见轮**的;都不满足才退回最新的那个。
+    let s = map.sessions[0];
+    let r = null;
+    let d = null;
+    for (const cand of map.sessions) {
+      const rr = readSessionEvents(cand.conv);
+      if (!rr.ok || !rr.events || !rr.events.length) continue;
+      const dd = dialogTurns(rr.events);
+      if (!dd.turns.some((t) => !(t.role === 'user' && !t.human))) continue;
+      s = cand; r = rr; d = dd; break;
+    }
+    if (!r) {
+      r = readSessionEvents(s.conv);
+      d = r.ok ? dialogTurns(r.events) : { turns: [], injected: 0, assistantEmpty: 0 };
+    }
     check(r.ok === true, '真机会话应能读出:' + r.reason);
     check(r.frames > 0 && r.events.length > 0, '应解出事件');
-    const d = dialogTurns(r.events);
     check(d.turns.length > 0, '真机会话应有对话轮');
     check(d.turns.some((t) => t.role === 'user'), '真机会话应有 user 轮');
     // 1.6 ·(2026-10-04)三代日志文件名都要认:`session.v4` / `session.v3` / 无版本 `session`。
@@ -140,7 +155,10 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
     //   于是回执里根本不出现 `#1`(序号跳号**正是**折叠的显示,回执里也这么解释)。
     //   判据要落在"**首条非注入轮**"上,否则这套测试会随"此刻谁在跑"时红时绿。
     const firstVisible = d.turns.find((t) => !(t.role === 'user' && !t.human));
-    check(Boolean(firstVisible) && txt.includes('#' + firstVisible.n + ' '), '目录回执应有首条非注入轮的行');
+    // 最近 5 个会话**全都没有**可见轮(极端:全新项目目录,唯一会话是刚建的)⇒ 本判据无可断言对象,
+    //   明说"跳过"而不是判红 —— 否则它仍然是一条"随环境变红"的假红。
+    if (firstVisible) check(txt.includes('#' + firstVisible.n + ' '), '目录回执应有首条非注入轮的行');
+    else console.log('· 跳过「目录回执首条非注入轮」断言(最近 5 个会话都没有可见轮)');
     check(RECALL_SPEC.output.render(null, {
       ok: true, action: 'read', conv: s.conv, project: s.project, frames: r.frames, bytes: r.bytes,
       totalTurns: d.turns.length, injected: 0, assistantEmpty: 0, remaining: 3, nextFrom: 9,

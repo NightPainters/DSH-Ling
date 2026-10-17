@@ -87,6 +87,23 @@ section('2) 出口① buildSnapshotText(L0 人格 + L1 记忆)');
   ok(dangerous(l1Text) === false, 'L1 记忆里的 {{…}} 未进提示面');
   ok(l1Text.includes('time'), '内容本身保留(只是定界符被拆开)');
 
+  // 1.7.1(审计 F-02):闸门不许再查"有没有会话概述" —— 料已换成深层库,
+  //   查概述会让"只有结论层条目、没有概述"的库**静默丢掉整段 L1**(面板看得见、注入看不见)。
+  //   反证:把 `memory.listOverviews({onlyOk:true}).length > 0` 这道闸加回去,本断言必须变红。
+  {
+    const deepOnly = {
+      kvGet: () => '', kvSet: () => {}, bumpHit: () => {},
+      listOverviews: () => [],
+      listDeepItems: () => [{
+        id: 'di:only', kind: '决定', durability: 'long', text: '只有结论的库也要出 L1',
+        at: iso(), created_at: iso(), conv_id: 'c-only', src: 'dsh', hit_count: 0, pinned: 0, superseded_by: '',
+      }],
+      sessionMeta: () => null,
+    };
+    const t = buildSnapshotText(null, deepOnly, { get: () => S }, 'sid-x', { keywords: [] }).text;
+    ok(t.includes('只有结论的库也要出 L1'), '只有深层条目的库也必须出 L1(闸门不许查概述)');
+  }
+
   // L0 侧:规矩是每次必注入的,一旦中招是**所有会话**一起失效
   const s2 = JSON.parse(JSON.stringify(S));
   s2.persona.hardRules = ['引用变量时要写成 {{变量名}} 的形式'];
@@ -123,7 +140,8 @@ section('3) 出口② inject.js 最外层');
 {
   const src = readFileSync(join(root, 'lib/host/inject.js'), 'utf8');
   ok(/neutralizeMustache/.test(src), 'inject.js 引入了 neutralizeMustache');
-  ok(/const body = neutralizeMustache\(text \|\| ''\)/.test(src), '正文经中和');
+  ok(/const body = wellFormed\(neutralizeMustache\(text \|\| ''\)\)/.test(src), '正文经中和且净化');
+  ok(/wellFormed\(\(body \? body \+ '\\n\\n' : ''\) \+ neutralizeMustache\(anchor\)\)/.test(src), '锚点合流后仍净化');
   ok(/neutralizeMustache\(anchor\)/.test(src), '时间锚经中和(它不经快照)');
   // 所有返回都走 withAnchor:漏一条就是漏一个出口
   const returns = [...src.matchAll(/return withAnchor\(/g)].length;
@@ -132,7 +150,7 @@ section('3) 出口② inject.js 最外层');
 
   const snapSrc = readFileSync(join(root, 'lib/host/snapshot.js'), 'utf8');
   ok(
-    /neutralizeMustache\(parts\.join\('\\n\\n'\)\)/.test(snapSrc),
+    /wellFormed\(neutralizeMustache\(parts\.join\('\\n\\n'\)\)\)/.test(snapSrc),
     'snapshot.js 成文即中和(parts.join 被包住)',
   );
 }

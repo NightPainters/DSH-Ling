@@ -35,6 +35,34 @@ check(db.linkVeins(brA, brA).ok === false, '自连被拒');
 check(db.unlinkVein(brA, brB).removed === 1 && db.listVeinLinks().length === 0, '断边');
 db.linkVeins(brA, brB, { kind: 'related', note: 'x' });
 
+// 2b) 1.7.1(审计 F-03):有向连边 A→B 与 B→A 是**两条不同的边**,断边只许删同向。
+//   反证:把 `unlinkVein` 改回无条件双向 DELETE,下面两条必须变红(`removed=2`、反向边消失)。
+{
+  db.linkVeins(brA, brB, { kind: 'prerequisite', note: '正向' });
+  db.linkVeins(brB, brA, { kind: 'prerequisite', note: '反向' });
+  const u = db.unlinkVein(brA, brB);
+  check(u.removed === 1, '有向边只删同向,实际 removed=' + u.removed);
+  const left = db.listVeinLinks().filter((l) => l.kind === 'prerequisite');
+  check(left.length === 1 && left[0].from === brB && left[0].to === brA, '反方向的有向边必须留下,实际 ' + JSON.stringify(left.map((l) => [l.from, l.to, l.kind])));
+  db.unlinkVein(brB, brA); // 收尾:不让这条边进后续断言
+  check(db.listVeinLinks().filter((l) => l.kind === 'prerequisite').length === 0, '收尾:反向边也能按同向删掉');
+  db.linkVeins(brA, brB, { kind: 'related', note: 'x' }); // 还原第 36 行那条关联边(后续断言要用)
+}
+
+// 2c) 1.7.1(delta 复审):**混合历史** —— 正向是无向、反向是有向,以前会被整对双删,
+//   把 directed 那条连带抹掉。反证:删掉「按每行自己的 kind 决策」那段,下面两条必红。
+{
+  db.linkVeins(brA, brB, { kind: 'related', note: '无向正向' });
+  db.linkVeins(brB, brA, { kind: 'prerequisite', note: '有向反向' });
+  const u = db.unlinkVein(brA, brB);
+  check(u.removed === 1, '混合方向:只删请求方向那一条,实际 removed=' + u.removed);
+  const left = db.listVeinLinks();
+  check(left.length === 1 && left[0].from === brB && left[0].to === brA && left[0].kind === 'prerequisite',
+    '混合方向:反向有向边必须留下,实际 ' + JSON.stringify(left.map((l) => [l.from, l.to, l.kind])));
+  db.unlinkVein(brB, brA); // 收尾:有向那条也按同向删掉
+  db.linkVeins(brA, brB, { kind: 'related', note: 'x' }); // 还原关联边
+}
+
 // 3) 并脉 + 防环
 check(db.reparentBranch(brA, v).ok, '并脉:枝挂到主脉下');
 check(db.branchAncestors(brA).join('>') === [brA, v, TRUNK_ID].join('>'), '血缘链穿过主脉,实际 ' + db.branchAncestors(brA).join('>'));
