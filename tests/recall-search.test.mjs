@@ -151,7 +151,8 @@ const check = (c, m) => { if (!c) { ok = false; console.log('✗', m); } };
   check(onlyDeep.includes('recall(conv=') && onlyDeep.includes('拿轮次'),
     '条目要给出"取原话"的下一步(先看目录再取,不直接印 from)');
   check(!onlyDeep.includes('from='), '★ 不许再印 from=<seq>(坐标系错位:事件流 seq ≠ 对话轮序号 n)');
-  check(onlyDeep.includes('下一步'), '有条目时也要给下一步');
+  // M2(1.7.2):「下一步」已收进工具 description —— 回执里**不再重复**印固定指令(那是噪音主体)。
+  check(!onlyDeep.includes('下一步'), 'M2:固定「下一步」不再印在回执里(已收进 description)');
   check(!onlyDeep.includes('${'), '条目回执不许有未插值');
   check(renderSearch({
     ok: true, q: 'x', all: false, deep: [{ kind: '偏好', text: '一句话', conv_id: 'c' }],
