@@ -13,7 +13,10 @@
       name: '@nightpainters/dsh-ling'
       # config(可选,覆盖默认值):
       #   dataDir: 覆盖数据目录(默认 $DSH_HOME/cache/dsh-ling)
-      #   injectEnabled: false  # 关掉**记忆段**注入(逃生开关;人格段另受 settings.persona.enabled 管)
+      #   injectEnabled: false  # 仓外总闸:整段注入(记忆段 section + 时间锚 context)都不注册。
+      #                          #   日常开关在面板,不必改这里:面板只有一个状态「器灵在场 / 她暂离」
+      #                          #   (= settings.inject.away:人格注入 / 记忆注入 / 记忆工具 / 后台与入库)
+      #                          #   本键 = 最后一道逃生开关,面板只读显示它;关着时面板那个开关不起作用。
       #   library:
       #     enabled: true       # 独立 library.db;不迁移既有记忆,不参与开场注入
       #     codeRoots: []       # 管理员登记的已存在绝对目录;默认不允许任何本地源

@@ -93,7 +93,10 @@ check(!srcIndex.includes('feedbackPollSec'), 'index.js 不再有 feedbackPollSec
 check(!srcIndex.includes('message-feedback.json'), 'index.js 不再读 sidecar 死文件');
 check(!/pollFeedback/.test(srcIndex), 'index.js 不再有 pollFeedback');
 check(!/fbTimer/.test(srcIndex), 'index.js 不再有 fbTimer(定时器已删)');
-check(srcIndex.includes('registerFeedbackListener(ctx, memory)'), 'index.js 挂上了事件驱动的监听');
+// 1.7.3 夜(2026-10-27):签名多了第三个参数 `settings` —— 反馈成长要跟着「在场/暂离」走,
+// 而离场是**运行时**动作,监听不能只在启动时装或不装,所以把 settings 传进去、在 handler 里现问。
+check(/registerFeedbackListener\(\s*ctx\s*,\s*memory\s*(,\s*settings)?\s*\)/.test(srcIndex),
+  'index.js 挂上了事件驱动的监听(带 settings:离场闸要在 handler 里现问)');
 
 // 8) 源码级:订阅在位(事件名钉死;改错名这条会红)
 check(FEEDBACK_COMMITTED_EVENT === 'feedback/committed', '事件名常量 = feedback/committed');

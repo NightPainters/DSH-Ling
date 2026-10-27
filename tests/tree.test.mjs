@@ -178,7 +178,9 @@ check(db.queryOverviews({ branch: TRUNK_ID, limit: 500 }).items.some((i) => i.co
 // 每条都走**真实投递路径**,压的是"注入面文本 + kv 水位",不是某个内部函数。
 const dir2 = mkdtempSync(join(tmpdir(), 'dsh-ling-tree-wm-'));
 const lg = new MemoryStore(join(dir2, 'wm.db'));
-const SET = { persona: { enabled: false }, styles: {}, mode: { lastMode: 'life' }, memory: { l1Enabled: false, branchLogEnabled: true } };
+// 1.7.3 夜 F 类:人格关 = 整个暂离(三键别名),本节的关注点是**播报本身**,
+//   所以人格必须开着 —— 旧写法 `persona.enabled:false` 在新判据下连播报一起停了。
+const SET = { persona: { enabled: true }, styles: {}, mode: { lastMode: 'life' }, memory: { l1Enabled: false, branchLogEnabled: true } };
 const settingsOf = (mem) => ({ get: () => ({ ...SET, memory: { ...SET.memory, ...(mem || {}) } }) });
 // 不冻结的 gate:每次投递都重新成文(= "每说一句注入一次"的真实节奏;D4 的冻结另有专门测试)
 const GATE = { snapshotOf: () => null, isRunning: () => false, markSnap: () => {} };

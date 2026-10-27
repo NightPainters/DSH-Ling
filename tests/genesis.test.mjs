@@ -6,7 +6,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (p) => import(pathToFileURL(join(root, p)).href);
 const { MemoryStore } = await imp('lib/host/memory.js');
-const { extractJson, parseGenesisResult, buildGenesisSource, isPlaceholderSummary, snippetFromRaw, composeGenesisRows, filterNamePairs } = await imp('lib/host/genesis.js');
+const { extractJson, parseGenesisResult, buildGenesisSource, isPlaceholderSummary, snippetFromRaw, composeGenesisRows, resolveGenesisScope, filterNamePairs } = await imp('lib/host/genesis.js');
 const { importRawTargets } = await imp('lib/host/deepsummary.js');
 
 const dir = mkdtempSync(join(tmpdir(), 'ling-gen-'));
@@ -148,6 +148,36 @@ check(filtered.length === 3, '剔除用户称谓组: ' + JSON.stringify(filtered
 check(!filtered.some((p) => p.formal === '张明' || p.nick === '老板'), '无主客混淆残留');
 check(filtered[0].formal === '风语' && filtered[2].formal === '小灵', '保序且保留合法组');
 check(filterNamePairs(null, 'x').length === 0, '非数组容错');
+
+// 9) 1.7.3:scope 分辨率 —— 默认值 + 空料降级(§七 待办 #4 那条老坑的回归钉)
+//    背景:旧实现"未指定 scope ⇒ 按 import 走",而 import 只读 source='import',
+//    dsweb/dsh 导入记的却是 'dsweb'/'dsh' ⇒ 新用户必撞 reason:'empty'。
+//    这里只钉纯函数的规则;HTTP 层与界面文案各自负责。
+//    ⚠️ 2026-10-27 红队审计后改过一条:显式选 'import' 而它为空时**不再自动扩到 all**
+//       (那等于替用户扩大读取范围),只回 `suggested` 让他自己再点一次。
+const dir9 = mkdtempSync(join(tmpdir(), 'ling-gen9-'));
+const memWeb = new MemoryStore(join(dir9, 'web.db'));
+memWeb.upsertOverview({ conv_id: 'web-1', source: 'dsweb', title: '网页端的一段', category: 'daily', updated_at: '2026-09-03T00:00:00Z', overview_ok: true, summary: '网页端导进来的概述内容足够长' });
+// ① 未指定 ⇒ 'all'(老默认 'import' 在这里会空)
+const gAuto = resolveGenesisScope(memWeb, undefined);
+check(gAuto.scope === 'all', '未指定 scope 默认 all: ' + gAuto.scope);
+check(!gAuto.suggested, '未指定 scope 不产生建议');
+check(!!gAuto.sourceText, '未指定 scope 也能拿到素材(只有 dsweb 料的库)');
+// ② 显式 'import' 而只有 dsweb 料 ⇒ **不扩范围**,只给建议
+const gFb = resolveGenesisScope(memWeb, 'import');
+check(gFb.scope === 'import', '显式 import 空料 ⇒ 仍停在 import(不自动扩范围): ' + gFb.scope);
+check(gFb.sourceText === '', '显式 import 空料 ⇒ 照实回空,由调用方报 empty');
+check(gFb.suggested && gFb.suggested.scope === 'all' && gFb.suggested.sampled >= 1,
+  '但要把"全部记忆里有几条"作为建议回上去: ' + JSON.stringify(gFb.suggested));
+// ③ 全空库 ⇒ 既无素材也无建议
+const memEmpty = new MemoryStore(join(dir9, 'empty.db'));
+const gNone = resolveGenesisScope(memEmpty, 'import');
+check(gNone.scope === 'import' && gNone.sourceText === '' && !gNone.suggested,
+  '全空库:不假装成功、也不瞎建议: ' + JSON.stringify({ s: gNone.scope, g: gNone.suggested }));
+// ④ 真·有 import 料时:照常成文,且**不产生**建议
+const gImp = resolveGenesisScope(mem, 'import');
+check(gImp.scope === 'import' && !gImp.suggested, '有 import 料时保持 import(无建议): ' + JSON.stringify({ s: gImp.scope, g: gImp.suggested }));
+check(!!gImp.sourceText, 'import 料能成文');
 
 console.log(ok ? '诞生仪式 genesis 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

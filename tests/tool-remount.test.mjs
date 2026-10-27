@@ -269,6 +269,23 @@ try {
     eq(again.reason, 'already', '同身份再绑 = already(不重复注册)');
     eq(spy.status().already, 1, 'already 计数可见');
 
+    // ── 1.7.3 U1:子代理在**注册期**就被挡掉(宿主掩码无解,只能在这里判) ──
+    // 依据:`dsh-tools/lib/index.js:2987` "scoped registrations remain visible",
+    // :3069 只过滤继承层;对 scope-local 名下 deny 直接抛错(:2986-3003)。
+    const subCalls = [];
+    const subBinder = createAgentToolBinder({
+      ctx: {}, register: (id) => { subCalls.push(id); return { ok: true, disposers: [() => {}] }; }, deps: {}, onNote: () => {},
+    });
+    const skipped = subBinder.bindOne({ session: { id: 's1', header: { origin: 'subagent' } }, ctx: { on() {}, get() {} } });
+    eq(skipped.reason, 'subagent-skip', '子代理被挡在注册之前');
+    eq(skipped.ok, true, '跳过不算失败(与 already 同形,调用方无需改)');
+    eq(subCalls.length, 0, '子代理真的没走 register(不是注册完再撤销)');
+    eq(subBinder.status().subagentSkipped, 1, 'status 里看得见跳过计数');
+    eq(subBinder.status().bound, 0, '跳过不计入已绑');
+    eq(subBinder.bindOne({ session: { id: 's2', header: { delegationDepth: 1 } }, ctx: { on() {}, get() {} } }).reason, 'subagent-skip', 'delegationDepth 也算子代理');
+    eq(subBinder.bindOne({ session: { id: 'f1', header: { parentSession: 'top' } }, ctx: { on() {}, get() {} } }).reason, 'bound', 'fork 照常绑(fail-open,不误伤主人的并行工作线)');
+    eq(subBinder.bindOne({ session: { id: 'u1' }, ctx: { on() {}, get() {} } }).reason, 'bound', '取不到 header 的裸 ctx 照常绑(宿主测试桩不得被误伤)');
+
     // 卸载:清空绑定表 + 禁止回绑
     await spy.dispose();
     eq(spy.status().bound, 0, 'dispose 清空绑定表(零留)');

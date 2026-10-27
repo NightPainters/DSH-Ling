@@ -540,7 +540,9 @@ head('V4 源码护栏(api.js)');
     '16b) 新契约注释在位:真闸门是字节 + 客户端按字节切批(≤200 条 且 ≤3 MiB/批)');
   check(src.includes('两半是耦合的'),
     '16c) 注释写明两半口径耦合:任何一方单独改上限都会让两端重新错位(本缺陷的成因)');
-  check(src.includes("register('/import/file/batch', async (req, res) => {\n      const body = JSON.parse((await readBody(req)) || '{}');"),
+  // 1.7.3 夜 F 类:该端点先过一道离场闸(离场时记忆写入停),所以 readBody 不再紧贴函数头 ——
+  // 判据改成"这一支里仍然只读一次 readBody(req),不传第二参",别把闸的位置写死。
+  check(/register\('\/import\/file\/batch', async \(req, res\) => \{[\s\S]{0,400}?JSON\.parse\(\(await readBody\(req\)\) \|\| '\{\}'\)/.test(src),
     '17) 端点仍写 readBody(req)(不传第二参:全部端点口径不变)');
 
   // ── 首字节闸(E5)源码护栏 ──────────────────────────────────────────────────

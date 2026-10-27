@@ -581,5 +581,56 @@ check(REQUIRED.some((r) => r.file === 'PUBLISH-WORKFLOW.md' && r.id === 'C6-STOR
   check(hostCalled === 1 && locH.local !== true, '★ 显式 hostSearch:true 才走宿主(且只走一次)');
 }
 
+// ── 10) F1(2026-10-27 双模型盲审,两路在同一处收敛):**定型后工具面不得改人格** ─────────
+//   背景:手术门的三条判据(本机来源/票据/承诺句)全挂在 HTTP 面上,工具调用**没有 headers**,
+//   于是"人格已定型"这道不变量在工具面**整条漏掉** —— 模型可绕过门直写 hardRules / habits。
+//   判据:① 三条工具全部 reason:'sealed';② 一个字都没落库;③ 文案把他指回面板(不做哑拒);
+//        ④ 未定型负对照照常放行(不打扰日常);⑤ 设置读不出来时 fail-open(与手术门 1.5 同口径)。
+{
+  const sdir = mkdtempSync(join(tmpdir(), 'ling-tools-sealed-'));
+  const sLocked = new SettingsFile(join(sdir, 'set'));
+  await sLocked.update({ persona: { sealed: true, sealPhrase: '这是我在定型时亲手写下的承诺句。' } });
+  const { proposeHabit } = await imp('lib/host/rules.js');
+  await proposeHabit({ settings: sLocked, habit: '定型前就躺在队列里的那条', byUser: true });
+
+  const regS = [];
+  const ctxS = { tools: { register: (spec) => { regS.push(spec); return () => {}; } } };
+  registerLingTools(ctxS, { gate: gate2, memory: memReal, settings: sLocked });
+  const tRule = regS.find((s) => s.name === TOOL_RULE_ADD);
+  const tHabit = regS.find((s) => s.name === TOOL_HABIT_PROPOSE);
+  const tResolve = regS.find((s) => s.name === TOOL_HABIT_RESOLVE);
+  const before = JSON.stringify({ r: rulesOf(sLocked), h: habitsPendingOf(sLocked), a: habitsOf(sLocked) });
+
+  const b1 = await tRule.execute({ rule: '定型之后偷偷加的一条规矩', quote: '就当他说过这句话' }, {});
+  check(b1.ok === false && b1.reason === 'sealed', '★F1 定型后 rule_add 拒(reason=sealed;实际 ' + JSON.stringify(b1).slice(0, 90) + ')');
+  check(/面板|承诺句/.test(String(b1.message || '')), '★F1 拒绝文案把他指回面板输入承诺句(不做哑拒)');
+  const b2 = await tHabit.execute({ habit: '定型之后偷偷提的一个习惯' }, {});
+  check(b2.ok === false && b2.reason === 'sealed', '★F1 定型后 habit_propose 拒(与 HTTP 面 /persona/habit 同口径)');
+  const b3 = await tResolve.execute({ action: 'accept' }, {});
+  check(b3.ok === false && b3.reason === 'sealed', '★F1 定型后 habit_resolve 拒(队列里明明有一条可采纳的,也不许它代确认)');
+  const after = JSON.stringify({ r: rulesOf(sLocked), h: habitsPendingOf(sLocked), a: habitsOf(sLocked) });
+  check(before === after, '★F1 三次拒绝后人格一个字都没变(前后逐字相等)');
+  check(habitsOf(sLocked).length === 0, '★F1 没有被"代确认"出来的习惯');
+
+  // ④ 未定型负对照:同一个工具、同一份设置,只把 sealed 拿掉 ⇒ 照常写入(不打扰日常)
+  const sOpen = new SettingsFile(join(mkdtempSync(join(tmpdir(), 'ling-tools-open-')), 'set'));
+  const regO = [];
+  registerLingTools({ tools: { register: (spec) => { regO.push(spec); return () => {}; } } }, { gate: gate2, memory: memReal, settings: sOpen });
+  const oRule = regO.find((s) => s.name === TOOL_RULE_ADD);
+  const o1 = await oRule.execute({ rule: '未定型时照常记规矩', quote: '以后都先给结论' }, {});
+  check(o1.ok === true && rulesOf(sOpen).length === 1, 'F1 负对照:未定型 ⇒ 工具照常写入(与 1.7.2 行为逐字一致)');
+
+  // ⑤ fail-open 口径:设置读不出来时**门不拦、也不误判成 sealed** —— 与 surgery.js 1.5 逃生开关
+  //    同一条理由(锁死一个读不出来的设置 = 让器灵连规矩都记不了)。
+  //    ⚠️ 判据只能是"理由**不是** sealed":此刻整份设置都炸了,`addRule` 读同一份设置也会抛 ⇒
+  //       写本身必定失败(reason:'internal')。写成"写成功"是错的期望 —— 那会把两条独立的失败混成一条。
+  const regX = [];
+  registerLingTools({ tools: { register: (spec) => { regX.push(spec); return () => {}; } } },
+    { gate: gate2, memory: memReal, settings: { get: () => { throw new Error('settings exploded'); } } });
+  const xRule = regX.find((s) => s.name === TOOL_RULE_ADD);
+  const x1 = await xRule.execute({ rule: '设置炸了也不该被误判成定型', quote: '以后都先给结论' }, {});
+  check(x1.reason !== 'sealed', 'F1:设置读失败 ⇒ 门**不误判为 sealed**(fail-open,与手术门同一逃生口径;实际 ' + JSON.stringify(x1).slice(0, 80) + ')');
+}
+
 console.log(ok ? '会话内工具 全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

@@ -642,5 +642,39 @@ const runTurn = async ({ h, live, memory, turn, messages = [userMsg()], base = 1
   } finally { Date.now = realNow; }
 }
 
+// ---------------- 18. F2(2026-10-27 双模型盲审):进展行必须跟随「记忆与图书馆」开关 ----------------
+//   修前症状:`inject.memoryEnabled=false` 时 handler 与预览都只认旧键 `memory.sessionProgressLine`,
+//   于是面板上把记忆关掉,`[本次会话·进展]` 仍然每轮进上下文 —— 开关的对外承诺(不注入记忆)不算数。
+{
+  const run = async ({ settings } = {}) => {
+    const memory = fakeMemory();
+    const agent = fakeAgent({ nodes: [], events: {} });
+    const res = await handler(memory, settings)(payloadOf({ agent }), async () => ({ kind: 'enter', messages: [userMsg()] }));
+    return { memory, res };
+  };
+  // ① 记忆开关关 ⇒ 不追加(旧键仍为 true,证明拦它的是新键)
+  const memOff = await run({ settings: { get: () => ({ memory: { sessionProgressLine: true }, inject: { memoryEnabled: false } }) } });
+  check(memOff.res.messages.length === 1 && memOff.memory.kv.size === 0,
+    '★★F2 记忆开关关 ⇒ 进展行不注入(旧键仍 true;res=' + memOff.res.messages.length + ' 条)');
+  // ② 预览同一判据
+  const pvOff = sessionLinePreview(fakeMemory(), { get: () => ({ memory: { sessionProgressLine: true }, inject: { memoryEnabled: false } }) }, SID, { turn: 3 });
+  check(pvOff.blocked === 'disabled', '★★F2 预览同样认记忆开关(blocked=' + pvOff.blocked + ')');
+  // ③ 负对照:开关为 true ⇒ 照常追加(证明上面不是"恒不注入")
+  const memOn = await run({ settings: { get: () => ({ memory: { sessionProgressLine: true }, inject: { memoryEnabled: true } }) } });
+  check(memOn.res.messages.length === 2 && memOn.memory.kv.size > 0, 'F2 负对照:开关开 ⇒ 照常追加');
+  // ④ 两闸独立:任一为 false 都停(旧键是免重启回退,不许因为新键存在就失效)
+  const bothOff = await run({ settings: { get: () => ({ memory: { sessionProgressLine: false }, inject: { memoryEnabled: true } }) } });
+  check(bothOff.res.messages.length === 1, 'F2 旧键仍然独立生效(新键为 true 也拦得住)');
+  // ⑤ 键缺失/非布尔 ⇒ 视为开(与面板"未设置=开"同一口径)
+  const noKey = await run({ settings: { get: () => ({}) } });
+  check(noKey.res.messages.length === 2, 'F2 键缺失 ⇒ 视为开(不误关)');
+  const strKey = await run({ settings: { get: () => ({ inject: { memoryEnabled: 'false' } }) } });
+  check(strKey.res.messages.length === 2, 'F2 非布尔值 ⇒ 按"未设置"处理(与 settings-file 的告警同口径)');
+  // ⑥ get() 抛错 ⇒ 退化成"不注入"(既有整段 try/catch),**不是** fail-open 到注入
+  const thrown = await run({ settings: { get: () => { throw new Error('settings boom'); } } });
+  check(thrown.res.messages.length === 1 && String(thrown.memory.kvGet(KV_ERR) || '').includes('boom'),
+    'F2 settings.get 抛错 ⇒ 退化成不注入 + 留证(别写成 fail-open)');
+}
+
 console.log(ok ? '活行(session-line)全部通过 ✓' : '存在失败 ✗');
 process.exit(ok ? 0 : 1);

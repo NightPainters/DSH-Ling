@@ -1,7 +1,7 @@
 // dsh-ling M1a unit tests — plain node, zero deps.
 // Run: node tests/unit.mjs
 import { ok, eq, section, summary } from './harness.mjs';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -270,6 +270,55 @@ await section('SettingsFile');
   const s2 = new SettingsFile(dir);
   eq(s2.get().mode.lastMode, 'work', '持久化读回');
   eq(s2.get().persona.tone, 'natural', '缺省字段保留');
+}
+
+// ---------------------------------------------------------------- F3/F4(1.7.3 双模型盲审)
+// 两条都长在"所有写面共用"的地基上:**读坏了不等于没设置过**、**落盘成功才改内存态**。
+await section('F3 设置读坏 ⇒ 保守关闭而不是静默重开');
+{
+  const { SettingsFile } = await imp('lib/host/settings-file.js');
+  const badDir = mkdtempSync(join(tmpdir(), 'dsh-ling-setbad-'));
+  // 截断的 JSON(模拟断电/磁盘满半写):正是 F3 描述的现实触发形态
+  writeFileSync(join(badDir, 'settings.json'), '{"__v":2,"user":{"persona":{"aiNam', 'utf8');
+  const sBad = new SettingsFile(badDir);
+  // 2026-10-27 夜:保守方向从"只关记忆"(留下人格 = 失忆的她)改成"整个器灵暂离"。
+  //   判据不变 —— 坏了就少给她看,不静默重开;变的是**关到哪一层**。
+  eq(sBad.get().inject.away, true, '读坏 ⇒ 按「器灵暂离」启动(方向:不泄露,不是静默重开)');
+  ok(sBad.loadError && sBad.loadError.reason === 'corrupt', 'loadError 如实记下原因(corrupt)');
+  eq(sBad.get().mode.lastMode, 'life', '其余字段仍走代码默认值(不因一条坏文件整体不可用)');
+  ok(sBad.warnings.some((w) => String(w).includes('settings.json')), 'warnings 里说破了(面板 /inject 的 GET 会带出去)');
+  // 证据必须保得住:第一次保存前把坏文件另存,不能被正常保存静默覆盖
+  await sBad.update({ mode: { lastMode: 'work' } });
+  ok(!!sBad.preservedAs && existsSync(sBad.preservedAs), '坏文件已另存为 settings.json.corrupt-*');
+  // 恢复路径:用户自己拨开(不是替他决定)
+  await sBad.update({ inject: { away: false } });
+  eq(sBad.get().inject.away, false, '用户可手动拨回(她回来)');
+  // 负对照:首启(文件不存在)不是"读坏",必须保持默认开
+  const sFresh = new SettingsFile(mkdtempSync(join(tmpdir(), 'dsh-ling-setfresh-')));
+  eq(sFresh.loadError, null, '首启(文件不存在)不算读坏');
+  eq(sFresh.get().inject.memoryEnabled, true, '首启保持默认开');
+}
+
+await section('F4 落盘失败 ⇒ 内存态与回执不许分叉');
+{
+  const { SettingsFile } = await imp('lib/host/settings-file.js');
+  const dir4 = mkdtempSync(join(tmpdir(), 'dsh-ling-setf4-'));
+  const s4 = new SettingsFile(dir4);
+  await s4.update({ mode: { lastMode: 'work' } });
+  const before = s4.get().mode.lastMode;
+  // 让写盘必然失败:把 settings.json 换成**同名目录**(写文件/改名都过不去,跨平台稳定)
+  const file = join(dir4, 'settings.json');
+  rmSync(file, { force: true });
+  mkdirSync(file);
+  let threw = false;
+  try { await s4.update({ mode: { lastMode: 'life' } }); } catch { threw = true; }
+  ok(threw, '写盘失败必须抛给调用方(不许假装成功)');
+  eq(s4.get().mode.lastMode, before, '失败时内存态保持旧值 —— 500 = 真的没改成');
+  // reset 同一条口径:失败不许先把内存态清空
+  let resetThrew = false;
+  try { await s4.reset(); } catch { resetThrew = true; }
+  ok(resetThrew, 'reset 写盘失败也抛');
+  eq(s4.get().mode.lastMode, before, 'reset 失败时内存态未被清空');
 }
 
 // ---------------------------------------------------------------- client

@@ -625,8 +625,8 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
 //    · 删掉了端点 ⇒ 从数组里删掉;**数与列表必须同批改**(否则数字与列表会互相说谎)。
 // 判据来源:`plans\AUDIT-dsh-ling-1.5.3-端点写面-未进POST_ONLY.md`(逐条读过 handler 的那份审计)。
 {
-  const POST_ONLY_ROUTES_TOTAL = 93;   // 已注册端点数(disposers.push(register('…')));88 → 90 = 1.7 导入通道两条(2026-10-10);90 → 91 = 浏览面 /library/browse 一条(2026-10-13,纯读);91 → 92 = 结论层只读面 /deep/items 一条(B 档,2026-10-15,纯读);92 → 93 = 后台行为开关 /auto 一条(2026-10-16,**双方法**:GET 读生效值 / POST 写 settings.auto ⇒ 不进差集)
-  const POST_ONLY_SET_SIZE = 62;   // POST_ONLY 集合条数;59 → 61 = 1.7 导入通道两条(两条都**是写面** ⇒ 差集不变);61 → 62 = /auto(它的**写半边**只许 POST ⇒ 进表;读半边另见 api.js 的 `DUAL_METHOD_READ_PATHS` —— 那张表只为它放行 GET,否则读半边会被这道闸 405 掉)
+  const POST_ONLY_ROUTES_TOTAL = 94;   // 已注册端点数(disposers.push(register('…')));88 → 90 = 1.7 导入通道两条(2026-10-10);90 → 91 = 浏览面 /library/browse 一条(2026-10-13,纯读);91 → 92 = 结论层只读面 /deep/items 一条(B 档,2026-10-15,纯读);92 → 93 = 后台行为开关 /auto 一条(2026-10-16,**双方法**:GET 读生效值 / POST 写 settings.auto ⇒ 不进差集);93 → 94 = 注入面开关 /inject 一条(1.7.3,**双方法**:GET 读生效值 / POST 写 settings.inject ⇒ 不进差集)
+  const POST_ONLY_SET_SIZE = 63;   // POST_ONLY 集合条数;59 → 61 = 1.7 导入通道两条(两条都**是写面** ⇒ 差集不变);61 → 62 = /auto(它的**写半边**只许 POST ⇒ 进表;读半边另见 api.js 的 `DUAL_METHOD_READ_PATHS` —— 那张表只为它放行 GET,否则读半边会被这道闸 405 掉);62 → 63 = /inject(与 /auto 完全同形:写 `settings.inject` 只许 POST,读半边同在 `DUAL_METHOD_READ_PATHS` 里)
   const POST_ONLY_DIFF_SNAPSHOT = [
     '/surgery/events',            // 事后日志(读手术门留痕),GET 不写
     '/health',

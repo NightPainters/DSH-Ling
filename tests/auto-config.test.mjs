@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // 脚手架(隔离 DSH_HOME / keep-alive 收尾坑)照抄 tests/library-api-tools.test.mjs,不另造一套。
 import { tmpdir } from 'node:os';
 import { mkdtempSync, rmSync, readFileSync, statSync, readdirSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -156,7 +156,10 @@ async function wireAuto(settings, cfg) {
     { gate: {}, memory: { kvSet() {}, listOverviews: () => [], fingerprint: () => '' }, settings },
     cfg);
   const server = createServer((req, res) => {
-    const path = String(req.url || '').split('?')[0];
+    // 与宿主**同一个路径语义**(dsh-host-webserver: `new URL(req.url, base).pathname`):
+    // 它会把 `.`/`..` 段归一掉。替身若不归一,就测不出"方法闸与宿主用两套路径语义"这条缺陷
+    // (1.7.3 E 类审计逮到的那条,见 api.js guard 里 sub 的注释)。
+    const path = new URL(String(req.url || '/'), 'http://dsh.internal').pathname;
     const h = routes.get(path);
     if (!h) { res.statusCode = 404; res.end('{"ok":false,"reason":"no-route"}'); return; }
     h(req, res);
@@ -211,6 +214,40 @@ for (const m of ['PUT', 'DELETE']) {
   const r = await callAuto(api1.base, m, AUTO_URL);
   ok(r.status === 405 && r.json?.error === 'method-not-allowed' && r.json?.want === 'POST',
     `${m} /auto ⇒ 405 want:POST(实际 ${r.status}/${JSON.stringify(r.json)})`);
+}
+// ── 1.7.3 E 类审计(2026-10-27)· 点段不得绕过方法闸 ────────────────────────────────────
+// 宿主按 `new URL(...).pathname` 匹配(吃掉 `.`/`..`),而 guard 原先拿**原始** `req.url` ⇒
+// `GET /api/dsh-ling/x/../persona` 在宿主侧归一成 `/api/dsh-ling/persona`(正正命中路由)、
+// 到 guard 里 `sub` 却是 `/x/../persona`(不在 POST_ONLY)⇒ 门放过,写面可被 GET 驱动。
+// 判据是 **405 而不是 403**:回 403 说明它穿过了方法闸、落到鉴权去了(那就是本缺陷还活着)。
+// ⚠️ 必须用 `node:http` 发**原始路径**:`fetch` 按 URL 规范会先把 `.`/`..` 归一掉再发,
+//    用 fetch 测这条永远绿(实测踩过:反证脚本退回旧写法,用 fetch 的那版断言照样全绿)。
+function rawCall(base, method, rawPath) {
+  const u = new URL(base);
+  return new Promise((resolve, reject) => {
+    // 本机 127.0.0.1 的 listen(0) 临时替身(与上面 `callAuto` 同源,离线不出网)。
+    const req = httpRequest({ host: u.hostname, port: u.port, method, path: rawPath }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { text += c; });
+      res.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* 非 JSON 照测 */ }
+        resolve({ status: res.statusCode, json, text });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+{
+  const rDot = await rawCall(api1.base, 'GET', '/api/dsh-ling/x/../persona');
+  ok(rDot.status === 405 && rDot.json?.error === 'method-not-allowed',
+    `原始路径 GET /x/../persona ⇒ 405(点段不得穿过写面闸;实际 ${rDot.status}/${JSON.stringify(rDot.json)})`);
+  const rDotDeep = await rawCall(api1.base, 'GET', '/api/dsh-ling/a/b/../../persona');
+  ok(rDotDeep.status === 405, `原始路径 GET /a/b/../../persona ⇒ 405(多层点段同样;实际 ${rDotDeep.status})`);
+  const rPlain = await rawCall(api1.base, 'GET', '/api/dsh-ling/persona');
+  ok(rPlain.status === 405, `对照:规范路径 GET /persona ⇒ 405(基线没被改坏;实际 ${rPlain.status})`);
 }
 // 守卫默认开着 ⇒ 读面要能通,只能走它自己的逃生开关(`settings.guard.enforce = false`,
 // 见 api.js 的 guardVerdict;另一条是 DSH_LING_GUARD=off)。这里用 settings 而不是环境变量,

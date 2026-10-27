@@ -151,16 +151,33 @@ try {
   independentStore.close();
   const searchTool = f.specs.get('library_search');
   eq((await searchTool.execute({ q: 'entry-only-token' }, {})).items[0].id, wiredItem.id);
+  // 1.7.3 U1:子代理**不该**白拿记忆工具(含 branch_edit / deep_item 写面)。
+  //   宿主侧无解:`dsh-tools` 的 `own` 层永远可见(`index.js:2987`),restrict 遮不住,
+  //   对 scope-local 名下 deny 还会直接抛错 ⇒ 只能在注册期判掉。故这里把 1.7.2 的
+  //   "子代理拿到 11 件"基准**反转**,并补一条顶层反例,确保不是"把能力一起删了"。
   const scoped = new Map();
   const agentCtx = { tools: { register(spec) { scoped.set(spec.name, spec); return () => scoped.delete(spec.name); } } };
   for (const listener of f.listeners.get('agent/created') ?? []) {
     listener({ agent: { ctx: agentCtx, session: { id: 'test-subagent', header: { origin: 'subagent' } } } });
   }
-  eq(scoped.size, 11, 'agent-scoped registration includes both library tools + deep_item(B 档)');
-  eq((await scoped.get('library_search').execute({ q: 'entry-only-token' }, {})).items[0].id, wiredItem.id);
-  eq((await scoped.get('library_check').execute({ id: wiredItem.id }, {})).state, 'ok');
+  eq(scoped.size, 0, 'U1:子代理不注册任何器灵工具(11 件一件都不给)');
+  const topScoped = new Map();
+  const topCtx = { tools: { register(spec) { topScoped.set(spec.name, spec); return () => topScoped.delete(spec.name); } } };
+  for (const listener of f.listeners.get('agent/created') ?? []) {
+    listener({ agent: { ctx: topCtx, session: { id: 'test-top', header: {} } } });
+  }
+  eq(topScoped.size, 11, 'U2 反例:顶层会话仍拿满 11 件(含 library 两件 + deep_item B 档)');
+  eq((await topScoped.get('library_search').execute({ q: 'entry-only-token' }, {})).items[0].id, wiredItem.id);
+  eq((await topScoped.get('library_check').execute({ id: wiredItem.id }, {})).state, 'ok');
+  // fork 必须照常绑(fail-open):它是主人的并行工作线,不是子代理。
+  const forkScoped = new Map();
+  const forkCtx = { tools: { register(spec) { forkScoped.set(spec.name, spec); return () => forkScoped.delete(spec.name); } } };
+  for (const listener of f.listeners.get('agent/created') ?? []) {
+    listener({ agent: { ctx: forkCtx, session: { id: 'test-fork', header: { parentSession: 'test-top' } } } });
+  }
+  eq(forkScoped.size, 11, 'U1:分叉会话(fork)照常绑定 —— 闸只对 subagent');
   await f.close();
-  eq(f.specs.size, 0); eq(scoped.size, 0, 'agent tool disposers collected');
+  eq(f.specs.size, 0); eq(topScoped.size, 0, 'agent tool disposers collected'); eq(forkScoped.size, 0, 'fork disposers collected');
   eq(f.routes.size, 0);
   eq((await searchTool.execute({ q: 'entry-only-token' }, {})).reason, 'closed');
 
