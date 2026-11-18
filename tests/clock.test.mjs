@@ -91,7 +91,12 @@ if (typeof timeAnchorLive === 'function') {
   const l1 = timeAnchorLive(mem, settings, { now: T1 });
   check(l1.includes('夜里'), 'context 侧含时段: ' + JSON.stringify(l1));
   check(l1.includes('距上次'), 'context 侧含间隔: ' + JSON.stringify(l1));
-  check(!/\d{1,2}:\d{2}/.test(l1), 'context 侧也不含时分(精度已降档)');
+  // T①(1.8.0 时间感知):`[现在]` 加钟点 —— 旧断言「context 侧也不含时分(精度已降档)」与 T①
+  //   直接冲突,按新契约**只改这一条**:① context 侧的 `[现在]` 行必须含 `HH:MM`;
+  //   ② 另加一条:system 侧的 `timeAnchorDate` 仍**不得**含 `HH:MM`(钟点不进前缀,T④ 的护栏)。
+  check(/\[现在\][^\n]*\d{2}:\d{2}/.test(l1), 'context 侧 [现在] 含钟点 HH:MM(T①): ' + JSON.stringify(l1));
+  const l1date = timeAnchorDate(mem, settings, { now: T1 });
+  check(!/\d{1,2}:\d{2}/.test(l1date), 'timeAnchorDate 不含 HH:MM(T④:钟点不得进 system 前缀): ' + JSON.stringify(l1date));
 }
 
 console.log(ok ? '时间锚与模式固化 全部通过 ✓' : '存在失败 ✗');

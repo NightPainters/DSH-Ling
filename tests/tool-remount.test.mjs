@@ -104,9 +104,9 @@ try {
     const registry = { list: () => [survivor.agent] };
     const first = makeHost({ agents: registry });
     mount(first, dataDir);
-    eq(first.globalTools.size, 11, '首次装载:全局注册 11 件工具');
-    eq(survivor.scoped.size, 11, '存量 agent 在**没有 created 事件**时被枚举补绑(修复点)');
-    eq(survivor.calls(), 11, '恰好注册 11 件,没有重复注册');
+    eq(first.globalTools.size, 13, '首次装载:全局注册 13 件工具');
+    eq(survivor.scoped.size, 13, '存量 agent 在**没有 created 事件**时被枚举补绑(修复点)');
+    eq(survivor.calls(), 13, '恰好注册 13 件,没有重复注册');
     // 监听数按"装载后有"判(别的模块也用 agent/* 事件,不能钉死绝对值);
     // "binder 自己每个事件名恰好挂一个"在 §5 用纯 binder 直测。
     yes(first.listenerCount(AGENT_TOOL_EVENTS[0]) >= 1, 'agent/created 监听已挂');
@@ -124,8 +124,8 @@ try {
 
     const second = makeHost({ agents: registry });
     mount(second, dataDir);                       // 同一个 agent 对象、同一个 ctx,依然没有 created
-    eq(second.globalTools.size, 11, '重装:全局 11 件');
-    eq(survivor.scoped.size, 11, '重装后存量 agent 被重新补绑');
+    eq(second.globalTools.size, 13, '重装:全局 13 件');
+    eq(survivor.scoped.size, 13, '重装后存量 agent 被重新补绑');
     eq((await searchOf(survivor.scoped)).ok, true, '重绑后的搜索走**新** runtime');
     await second.dispose();
     eq(survivor.scoped.size, 0, '第二次卸载同样清干净');
@@ -139,17 +139,17 @@ try {
     const registry = { list: () => [one.agent] };
     const host = makeHost({ agents: registry });
     mount(host, dataDir);
-    eq(one.calls(), 11, '枚举一次 = 11 件');
+    eq(one.calls(), 13, '枚举一次 = 13 件');
     host.fire('agent/created', { agent: one.agent });
-    eq(one.calls(), 11, '同一 agent 再收 created:不重复注册');
+    eq(one.calls(), 13, '同一 agent 再收 created:不重复注册');
     host.fire('agent/session-start', { agent: one.agent });
-    eq(one.calls(), 11, '两个事件名同发:仍不重复注册');
+    eq(one.calls(), 13, '两个事件名同发:仍不重复注册');
     host.fire('agent/created', { agent: one.agent, source: 'tick' });
-    eq(one.calls(), 11, '第三次事件也不重复');
+    eq(one.calls(), 13, '第三次事件也不重复');
     const later = makeAgent('dedup-later');
     registry.list = () => [one.agent, later.agent];
     host.fire('agent/created', { agent: later.agent });
-    eq(later.calls(), 11, '之后新建的 agent 走事件照常绑上(去重不误伤新 agent)');
+    eq(later.calls(), 13, '之后新建的 agent 走事件照常绑上(去重不误伤新 agent)');
     await host.dispose();
     eq(one.scoped.size + later.scoped.size, 0, '卸载后两个 agent 的注册都撤销');
   }
@@ -162,8 +162,8 @@ try {
     const b = makeAgent('same-sid');
     const host = makeHost({ agents: { list: () => [a.agent, b.agent] } });
     mount(host, dataDir);
-    eq(a.scoped.size, 11, '第一个 agent 绑上 11 件');
-    eq(b.scoped.size, 11, '同 sid 的第二个 agent 也绑上 11 件(各绑各的)');
+    eq(a.scoped.size, 13, '第一个 agent 绑上 13 件');
+    eq(b.scoped.size, 13, '同 sid 的第二个 agent 也绑上 13 件(各绑各的)');
     yes(a.ctx !== b.ctx, '前提:两个 agent 的 ctx 是不同对象');
     await host.dispose();
     eq(a.scoped.size + b.scoped.size, 0, '两个都撤销');
@@ -184,18 +184,18 @@ try {
     // 槽位会移位 —— 而且"卸载后回调就算被调用也必须拒绝"本来就是要测的东西。
     const agentInjectCb = agentInjects[0].cb;
     yes(typeof agentInjectCb === 'function', '拿到 agents inject 回调');
-    eq(host.globalTools.size, 11, '全局工具不受影响');
+    eq(host.globalTools.size, 13, '全局工具不受影响');
     agentInjectCb({ agents: { list: () => [late.agent] } });
-    eq(late.scoped.size, 11, 'agents 迟到后补绑存量 agent');
-    eq(late.calls(), 11, '迟到补绑也是 11 件');
+    eq(late.scoped.size, 13, 'agents 迟到后补绑存量 agent');
+    eq(late.calls(), 13, '迟到补绑也是 13 件');
     agentInjectCb({ agents: { list: () => [late.agent] } });
-    eq(late.calls(), 11, 'inject 回调重复触发不重复注册');
+    eq(late.calls(), 13, 'inject 回调重复触发不重复注册');
     await host.dispose();
     eq(late.scoped.size, 0, '卸载撤销');
     host.fire('agent/created', { agent: late.agent });
-    eq(late.calls(), 11, '卸载后事件不再回绑');
+    eq(late.calls(), 13, '卸载后事件不再回绑');
     agentInjectCb({ agents: { list: () => [late.agent] } });
-    eq(late.calls(), 11, '卸载后 inject 回调也不再回绑');
+    eq(late.calls(), 13, '卸载后 inject 回调也不再回绑');
   }
 
   // ── 5) binder 直测:部分失败/抛错/无 ctx/身份判定/不绕过 guard ──

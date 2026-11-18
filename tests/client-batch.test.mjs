@@ -251,10 +251,10 @@ ok(src.includes('按体量切批'), 'T0 预览文案已按体量口径');
 ok(!/^\s*import\s/m.test(src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')), 'T0 client.js 未引入 import(仍是单文件 bundle)');
 
 // ---------------------------------------------------------------- T8 B(2026-09-29 记忆包 413 说人话)
-await section('T8 B 记忆包 413 文案:三件事说清 + 上限只许来自回执 + sealed 原文逐字未变');
+await section('T8 B 记忆包 413 文案:三件事说清 + 上限只许来自回执 + sealed 文案不死路');
 // ⚠️ **证据边界(如实说明)**:bImp 的 `.then/.catch` 长在 `renderOverview` 的闭包里 —— 要执行到它需要
-// 真实 DOM 挂载 + FileReader + window.confirm + 真 fetch,本文件的最小桩不具备(`exports.__test__` 也不覆盖它,
-// 它只导出 takeChunk / utf8Len 这类**纯函数**)。⇒ T8 是**源码护栏**,不是执行级覆盖;
+// 真实 DOM 挂载 + FileReader + window.confirm + 真 fetch,本文件的最小桩不具备。⇒ T8 是**源码护栏**,
+// 不是执行级覆盖;m12 起 sealed 分支的**行为**(承诺句透传)由 tests/client-import.test.mjs 覆盖。
 // 不许为了"让测试好看"去重构 UI 结构换可测性(与 T7 / C-1 同一条口径)。
 {
   // ⚠️ 所有**文案断言**都先剥掉 `//` 注释行再匹配:否则注释里出现同样的词就能让断言假绿
@@ -300,10 +300,19 @@ await section('T8 B 记忆包 413 文案:三件事说清 + 上限只许来自回
   ok(/r\.message \|\| r\.error \|\| r\.reason/.test(elseCode) && elseCode.indexOf('message') < elseCode.indexOf('JSON.stringify'),
     'T8-③d 其余失败:先取服务端 message,JSON 摘要只作最后兜底(源码顺序 = 优先级)');
 
-  // ── ④ sealed 分支原文**逐字未变**(与 1.5.3 备份的同一行相等)──────────────
-  const SEALED_LINE = "toast('导入失败:人格已定型 — 请先到「人格中心」做手术(输入承诺句)后再覆盖导入;仅导入记忆不受影响');";
-  ok(sealedCode.includes(SEALED_LINE), 'T8-④ sealed 分支文案逐字未变(与备份那一行相等)');
-  console.log(`    sealed 段含原文逐字:${sealedCode.includes(SEALED_LINE)} · 段内 toast 调用=${(sealedCode.match(/toast\(/g) || []).length} 处`);
+  // ── ④ sealed 分支:m12 起说清"哪一步没过 + 一条能走通的路"─────────────────────
+  //   修前的原文是「人格已定型 — 请先到「人格中心」做手术(输入承诺句)后再覆盖导入;仅导入记忆不受影响」:
+  //   那条建议是**死路**(人格中心那条路同样不带承诺句,旧 payload 固定 `{bundle, persona:true}`),
+  //   而且这次请求连记忆都没落库(门在 importBundle 之前)⇒ 文案与实现的行为边界不一致。
+  //   m12 的修法在【导入这一跳】自己收承诺句(tests/client-import.test.mjs 行为级覆盖),
+  //   所以这里的护栏改成"新口径逐字在位 + 死路建议不许回来"。
+  const SEALED_LINE = '承诺句与定型时的那句不一致 —— 人格没有覆盖';
+  ok(sealedCode.includes(SEALED_LINE), 'T8-④ sealed 分支说清"承诺句不对 ⇒ 人格没有覆盖"(m12 新文案)');
+  ok(!sealedCode.includes('请先到「人格中心」做手术'),
+    'T8-④b 死路建议不许回来("请先去人格中心输入承诺句" —— 那条路同样不带 unlock)');
+  ok(/一个字节都没落库/.test(sealedCode) && /「取消」/.test(sealedCode),
+    'T8-④c 说清"记忆也没落库" + 给出主人能走通的那条路(重选文件、选「取消」只并入记忆)');
+  console.log(`    sealed 段含新文案逐字:${sealedCode.includes(SEALED_LINE)} · 段内 toast 调用=${(sealedCode.match(/toast\(/g) || []).length} 处`);
 
   // ── ⑤ .catch:保留原话 + 只给"可能",不下确定结论 ─────────────────────────
   ok(catchCode.includes('导入失败(网关不可达)'), 'T8-⑤ .catch 保留「导入失败(网关不可达)」原话');

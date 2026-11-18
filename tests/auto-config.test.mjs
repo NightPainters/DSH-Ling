@@ -327,6 +327,309 @@ eq(rWin.json?.effective?.deepIntervalMin, 45, 'settings 写 45 ⇒ 压过配置�
 eq(rWin.json?.effective?.source?.deepIntervalMin, 'settings', '该键 source 变 settings(配置让位)');
 eq(rWin.json?.effective?.deepSummary, false, '没写的键仍由配置接管(压过是逐键的,不是整块)');
 
+// ---------------- 10) rc.4 · `/model/background`(M21-4)----------------
+// 为什么写在这一套里:它与 /auto、/inject 是**同一类**端点(写 settings 的一个子树 + GET 读生效值),
+// 而这套已经有"真 Node server + registerApi + DSH_HOME 隔离"的脚手架(见第 6-9 段)。
+// ⚠️ 本段**不写死** guard.test.mjs 的 665/666 计数:那是 guard.test.mjs 的事;这里只钉"路径进表"
+//    与端点行为 —— 否则 M21-7 加 /mode/effort 时这套会无故变红(两条新端点各 +1,不是同一条)。
+await section('真实 HTTP · /model/background:方法闸 / 仅本机 / 白名单 / 原型键 / 清除语义 / 落盘');
+const bgData = join(httpTmp, 'data-bg');
+const bgFile = join(bgData, 'settings.json');
+const bgSettings = new SettingsFile(bgData);
+const PLAT = { provider: 'platform-p', model: 'platform-m' };
+// 守卫的逃生开关(与第 6 段同一理由):读/写面要能通;"只许本机"另有端点内判据(readIsLocal)。
+await bgSettings.update({ guard: { enforce: false } });
+
+/** 真 server + registerApi 的 exact 路由(接线同本文件第 6 段的 wireAuto,只多一个"平台当前选择"桩)。
+ *  第三参 `kv`(可选):`llm.background.lastError` 的回显测试(M21-6)需要一枚**能读回**的 kv ——
+ *  传 Map 就是真读回,不传则是"永远读不到"(前 10 段的行为与改动前逐字一致)。
+ *  第四参 `spy`(可选,B.7-7):给了就在 adm 桩上装一枚 `saveSelection` 计数器 ——
+ *  不传时该键**缺席**(与改动前逐字同形),故不影响前 10 段。 */
+async function wireBackground(settings, selection, kv, spy) {
+  const routes = new Map();
+  const webServer = { register: (r) => { routes.set(r.path, r.handler); return () => routes.delete(r.path); } };
+  const adm = {
+    currentSelection: () => selection,
+    ...(spy ? { saveSelection: (sel) => { spy.saveSelectionCalls.push(sel); return Promise.resolve(); } } : {}),
+  };
+  const ctx = { get: (name) => (name === 'agentDefaultModel' ? adm : webServer) };
+  const dispose = registerApi(ctx, {
+    gate: {},
+    memory: {
+      kvSet(k, v) { if (kv) kv.set(String(k), String(v)); },
+      kvGet(k) { return kv ? (kv.get(String(k)) ?? null) : null; },
+      listOverviews: () => [], fingerprint: () => '',
+    },
+    settings,
+  }, { version: 'test-1.7' });
+  const server = createServer((req, res) => {
+    const path = new URL(String(req.url || '/'), 'http://dsh.internal').pathname;
+    const h = routes.get(path);
+    if (!h) { res.statusCode = 404; res.end('{"ok":false,"reason":"no-route"}'); return; }
+    h(req, res);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  return {
+    routes,
+    base: 'http://127.0.0.1:' + server.address().port,
+    close: async () => {
+      try { server.closeAllConnections?.(); } catch { /* 老 Node 没有这个方法 */ }
+      await new Promise((r) => server.close(() => r()));
+      dispose();
+    },
+  };
+}
+/** B.7-7 的计数外壳:包住真 SettingsFile,把**每次** `update` 的 patch 原文记进 `calls`。
+ *  ⚠️ 只记不拦、不改写:读写仍走真实现(落盘行为与不带外壳时逐字一致)⇒ 断言的是"真发生了什么",
+ *     不是"我们拦住之后剩什么"。`user` 走 getter 直通(api.js 的 effort/写面读它)。 */
+function countingSettings(inner, calls) {
+  return {
+    get user() { return inner.user; },
+    get: () => inner.get(),
+    update: (patch) => { calls.push(patch); return inner.update(patch); },
+  };
+}
+
+/** 本机回环替身(离线不出网):base 由 listen(0) 的临时端口现场拼出。 */
+async function callBg(base, method, body, extraHeaders) {
+  const res = await fetch(base + '/api/dsh-ling/model/background', {
+    method,
+    headers: body === undefined
+      ? extraHeaders
+      : { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
+    body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* 非 JSON 也照测 */ }
+  return { status: res.status, json, text };
+}
+
+const apiBundle = await wireBackground(bgSettings, PLAT);
+ok(apiBundle.routes.has('/api/dsh-ling/model/background'), '/model/background 路由在册');
+// ① 方法闸:进 POST_ONLY 的写半边只许 POST ⇒ PUT/DELETE 405;读半边由 DUAL_METHOD_READ_PATHS 放行
+//    ⇒ GET 必须 200(忘了那张表就是 405,ALIGN-v7 §5.4-4 / MUT-D4-4)。
+for (const m of ['PUT', 'DELETE', 'PATCH']) {
+  const r = await callBg(apiBundle.base, m);
+  ok(r.status === 405 && r.json?.error === 'method-not-allowed' && r.json?.want === 'POST',
+    `${m} /model/background ⇒ 405 want:POST(实际 ${r.status}/${JSON.stringify(r.json)})`);
+}
+// ② B.7-1:两键皆空 ⇒ GET source:'platform'(跟随平台当前选择),effective = 平台选择,0 写盘
+const beforeBg = snapshot(bgFile);
+const bgGet0 = await callBg(apiBundle.base, 'GET');
+ok(bgGet0.status === 200, `GET /model/background ⇒ 200(实际 ${bgGet0.status}/${bgGet0.text.slice(0, 200)})`);
+eq(bgGet0.json?.configured, { provider: '', model: '' }, 'B.7-1 未设置时 configured 两键为空');
+eq(bgGet0.json?.effective, PLAT, 'B.7-1 未设置时 effective = 平台当前选择');
+eq(bgGet0.json?.source, 'platform', "B.7-1 未设置时 source === 'platform'");
+eq(bgGet0.json?.followed, true, 'B.7-1 未设置时 followed === true(跟随平台)');
+eq(bgGet0.json?.lastError, null, 'D-3 的 lastError 面:kv 无记录且同进程无失败 ⇒ null(不是"一切正常"的断言)');
+eq(snapshot(bgFile), beforeBg, 'GET 只读:settings.json 内容与 mtime 都没动');
+// ③ 源码级:路径必须同时进 POST_ONLY 与 DUAL_METHOD_READ_PATHS,且**不许**进 GET_ONLY
+{
+  const apiText = readFileSync(join(root, 'lib/host/api.js'), 'utf8');
+  const postBlock = apiText.match(/const POST_ONLY = new Set\(\[([\s\S]*?)\]\);/);
+  const dualLine = apiText.match(/const DUAL_METHOD_READ_PATHS = new Set\(\[([\s\S]*?)\]\);/);
+  const getBlock = apiText.match(/const GET_ONLY = new Set\(\[([\s\S]*?)\]\);/);
+  const picked = (b) => [...String(b && b[1] || '').replace(/\/\/[^\n]*/g, '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  ok(picked(postBlock).includes('/model/background'), 'POST_ONLY 里有 /model/background(写半边只许 POST)');
+  ok(picked(dualLine).includes('/model/background'), 'DUAL_METHOD_READ_PATHS 里有 /model/background(读半边放行)');
+  ok(!picked(getBlock).includes('/model/background'), 'GET_ONLY 里没有 /model/background(否则 POST 被自己的读面闸 405)');
+}
+// ④ 写面:只收字符串 + trim 后写;落盘回读的是**真文件**
+const bgSet = await callBg(apiBundle.base, 'POST', { provider: '  p  ', model: 'm' });
+ok(bgSet.status === 200, `POST /model/background ⇒ 200(实际 ${bgSet.status}/${bgSet.text.slice(0, 200)})`);
+eq(bgSet.json?.configured, { provider: 'p', model: 'm' }, 'POST 后 configured = trim 后的两键');
+eq(bgSet.json?.source, 'settings', "两键齐全 ⇒ source === 'settings'");
+eq(bgSet.json?.effective, { provider: 'p', model: 'm' }, '两键齐全 ⇒ effective = 设置值(不是平台选择)');
+eq(bgSet.json?.dropped, [], '没有丢弃时不虚报 dropped');
+eq(JSON.parse(readFileSync(bgFile, 'utf8'))?.user?.model?.background, { provider: 'p', model: 'm' },
+  'settings.json 的 user.model.background = trim 后的两键(盘上是真值)');
+const bgGet1 = await callBg(apiBundle.base, 'GET');
+eq(bgGet1.json?.configured, { provider: 'p', model: 'm' }, 'GET 读回来的就是写下去的那份');
+eq(bgGet1.json?.source, 'settings', "落盘读得回来 ⇒ source === 'settings'");
+// ⑤ B.7-4:坏值 ⇒ 400 + dropped,0 写;GET 仍回落
+const beforeBad = snapshot(bgFile);
+for (const [name, body, dropKey] of [
+  ["provider:123(数字)", { provider: 123 }, 'provider'],
+  ["provider:null", { provider: null }, 'provider'],
+  ["provider:{a:1}(对象)", { provider: { a: 1 } }, 'provider'],
+  ["provider:['p'](数组)", { provider: ['p'] }, 'provider'],
+  ["provider:'   '(全空白)", { provider: '   ' }, 'provider'],
+  ['想吃鱼(白名单外)', { 想吃鱼: true }, '想吃鱼'],
+]) {
+  const r = await callBg(apiBundle.base, 'POST', body);
+  ok(r.status === 400 && r.json?.ok === false && r.json?.error === 'nothing-to-update',
+    `B.7-4 ${name} ⇒ 400 nothing-to-update(实际 ${r.status}/${JSON.stringify(r.json)})`);
+  eq(r.json?.dropped, [dropKey], `B.7-4 ${name} ⇒ dropped 点名该键`);
+}
+eq(snapshot(bgFile), beforeBad, 'B.7-4 五次拒绝后 settings.json 内容与 mtime 逐字未变(0 写)');
+const bgEmpty = await callBg(apiBundle.base, 'POST', {});
+ok(bgEmpty.status === 400 && bgEmpty.json?.error === 'nothing-to-update', '无合法键(空 body)⇒ 400 nothing-to-update');
+eq((await callBg(apiBundle.base, 'GET')).json?.configured, { provider: 'p', model: 'm' },
+  'B.7-4 被拒之后 configured 仍是上一次成功写入的那份(拒绝没有顺手落盘)');
+// ⑥ B.7-8:非本机(带代理头 / 无 UA)⇒ 403 local-only 且 0 写
+const beforeRemote = snapshot(bgFile);
+for (const [name, headers] of [
+  ['带 x-forwarded-for', { 'x-forwarded-for': '203.0.113.9' }],
+  ['带 x-real-ip', { 'x-real-ip': '203.0.113.9' }],
+]) {
+  const r = await callBg(apiBundle.base, 'POST', { provider: 'evil', model: 'evil' }, headers);
+  ok(r.status === 403 && r.json?.reason === 'local-only',
+    `B.7-8 ${name} 的 POST ⇒ 403 local-only(实际 ${r.status}/${JSON.stringify(r.json)})`);
+}
+eq(snapshot(bgFile), beforeRemote, 'B.7-8 非本机两次拒绝后 settings.json 逐字未变(0 写)');
+// ⑦ B.7-9:原型键(任意层级)⇒ 400 forbidden-key、0 写、Object.prototype 未被污染
+const beforeEvil = snapshot(bgFile);
+for (const [name, rawBody] of [
+  ['顶层 __proto__', '{"__proto__":{"polluted":1}}'],
+  ['嵌套 __proto__', '{"provider":{"__proto__":{"x":1}}}'],
+  ['constructor.prototype', '{"constructor":{"prototype":{"polluted":true}}}'],
+  ['顶层 prototype', '{"model":"m","prototype":1}'],
+  ['patch 里的 __proto__', '{"patch":{"__proto__":{"polluted":1}}}'],
+]) {
+  const r = await callBg(apiBundle.base, 'POST', rawBody);
+  ok(r.status === 400 && r.json?.error === 'forbidden-key' && r.json?.reason === 'forbidden-key',
+    `B.7-9 ${name} ⇒ 400 forbidden-key(实际 ${r.status}/${JSON.stringify(r.json)})`);
+}
+eq(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted'), false, 'B.7-9 Object.prototype 没有被种上 polluted');
+eq({}.polluted, undefined, 'B.7-9 全局原型链干净({}.polluted === undefined)');
+eq(Object.getPrototypeOf({}), Object.prototype, 'B.7-9 普通对象原型未被改写');
+eq(snapshot(bgFile), beforeEvil, 'B.7-9 五次拒绝后 settings.json 逐字未变(0 写)');
+// ⑧ B.7-5:清除语义 —— 空串 = 清除(回到"未设置")
+const bgClear = await callBg(apiBundle.base, 'POST', { provider: '', model: '' });
+ok(bgClear.status === 200, `POST 两键空串 ⇒ 200(实际 ${bgClear.status}/${bgClear.text.slice(0, 200)})`);
+eq(bgClear.json?.configured, { provider: '', model: '' }, 'B.7-5 清除后 configured 两键为空');
+const cleared = JSON.parse(readFileSync(bgFile, 'utf8'))?.user?.model?.background;
+ok(cleared === undefined || (cleared.provider === '' && cleared.model === ''),
+  'B.7-5 settings.json 两键为空或子树被清(实际 ' + JSON.stringify(cleared) + ')');
+const bgGet2 = await callBg(apiBundle.base, 'GET');
+eq(bgGet2.json?.source, 'platform', "B.7-5 清除后 GET source === 'platform'(回到跟随平台)");
+eq(bgGet2.json?.effective, PLAT, 'B.7-5 清除后 effective 回到平台当前选择');
+// ⑧-bis B.7-3(M21-5):只填 model(provider 空)⇒ 写面照收,但解析级**整对忽略** ⇒ source:'platform'
+//    (禁止 `provider 设置 × model 平台` 混搭:会拼出一个不存在的组合)
+const bgHalf = await callBg(apiBundle.base, 'POST', { model: 'only-m' });
+ok(bgHalf.status === 200, `B.7-3 只填 model ⇒ 200(实际 ${bgHalf.status}/${bgHalf.text.slice(0, 200)})`);
+eq(bgHalf.json?.configured, { provider: '', model: 'only-m' }, 'B.7-3 写面如实回报单键 configured');
+eq(bgHalf.json?.source, 'platform', "B.7-3 只填 model ⇒ source === 'platform'(整对忽略,不是混搭)");
+eq(bgHalf.json?.effective, PLAT, 'B.7-3 effective = 平台当前选择(设置级单键不得拆开用)');
+const bgHalfGet = await callBg(apiBundle.base, 'GET');
+eq(bgHalfGet.json?.source, 'platform', "B.7-3 落盘后 GET 仍 source === 'platform'");
+// ⑨ B.7-1 的反向对照:平台选择读不到 ⇒ source:'fallback'(兜底),而不是谎称 platform
+{
+  const byKey = join(httpTmp, 'data-bg-noselect');
+  const byKeySettings = new SettingsFile(byKey);
+  await byKeySettings.update({ guard: { enforce: false } });
+  const apiNoSel = await wireBackground(byKeySettings, null);
+  const r = await callBg(apiNoSel.base, 'GET');
+  ok(r.status === 200, `读不到平台选择时 GET ⇒ 200(实际 ${r.status})`);
+  eq(r.json?.source, 'fallback', "读不到平台选择 ⇒ source === 'fallback'(不谎称 platform)");
+  eq(r.json?.followed, false, '读不到平台选择 ⇒ followed === false');
+  await apiNoSel.close();
+}
+// ⑨-ter **B.7-7**(M21-8 §7-3 的缺口补齐):`/model/background` 与档位面**不相干** ——
+//   成功路径与失败路径都**不许**调 `saveSelection`、都**不许**写 `mode.lastMode`
+//   (lastMode 的唯一写面 = `settings.update({mode:{lastMode}})`),且 `settings.mode` **逐字未变**。
+//   判法(不是"论证"、更不是 check(true)):
+//     · `countingSettings` 外壳把**每一次**真实 `settings.update` 的 patch 原文记下来
+//       ⇒ "写了几次、写的是什么"逐字对照(漏写/多写/夹带 mode 键立刻红);
+//     · adm 桩上装 `saveSelection` 计数器 ⇒ 谁调谁留痕(0 次才是"没碰");
+//     · 成功/失败各跑一条,失败侧三次拒绝(坏值 400 / 原型键 400 / 非本机 403)后
+//       `settings.update` 次数**必须一毫米都不涨**;
+//     · 改前/改后各拍一份 `settings.get().mode`(默认值 ⊕ 用户补丁)与盘上 `user.mode`
+//       ⇒ 逐字 JSON 相等。
+{
+  const b77Data = join(httpTmp, 'data-bg-b77');
+  const b77File = join(b77Data, 'settings.json');
+  const b77Settings = new SettingsFile(b77Data);
+  await b77Settings.update({ guard: { enforce: false } });
+  const b77Calls = [];                       // 每次 settings.update 的 patch 原文
+  const b77Spy = { saveSelectionCalls: [] };
+  const apiB77 = await wireBackground(countingSettings(b77Settings, b77Calls), PLAT, null, b77Spy);
+  const modeBefore = JSON.stringify(b77Settings.get().mode);
+  const userModeBefore = JSON.stringify(b77Settings.user?.mode ?? null);
+  // ① 成功路径:200,且**唯一**一次写就是 model.background(patch 逐字相等)
+  const callBeforeOk = b77Calls.length;
+  const r77Ok = await callBg(apiB77.base, 'POST', { provider: 'b77-p', model: 'b77-m' });
+  ok(r77Ok.status === 200, `B.7-7 成功路径 POST ⇒ 200(实际 ${r77Ok.status}/${r77Ok.text.slice(0, 200)})`);
+  eq(b77Calls.length - callBeforeOk, 1, 'B.7-7 成功路径 settings.update 恰 1 次');
+  {
+    const b77Patch = b77Calls[b77Calls.length - 1] || {};
+    eq(Object.keys(b77Patch), ['model'], 'B.7-7 成功路径唯一一次写只碰顶层键 model(没有 mode / 别的混进来)');
+    eq(Object.keys(b77Patch?.model || {}), ['background'], 'B.7-7 写的是 model.background 一个子树');
+    eq(b77Patch?.model?.background, { provider: 'b77-p', model: 'b77-m' },
+      'B.7-7 成功路径唯一一次写 = model.background(patch 逐字相等)');
+  }
+  // ② 失败路径:坏值 / 白名单外 ⇒ 400,原型键 ⇒ 400,非本机 ⇒ 403;三次之后 0 次 settings.update
+  const callBeforeBad = b77Calls.length;
+  for (const [name, body] of [
+    ['坏值 provider:123', { provider: 123 }],
+    ['白名单外 想吃鱼', { 想吃鱼: true }],
+  ]) {
+    const r = await callBg(apiB77.base, 'POST', body);
+    ok(r.status === 400, `B.7-7 失败路径 ${name} ⇒ 400(实际 ${r.status}/${r.text.slice(0, 160)})`);
+  }
+  const r77Evil = await callBg(apiB77.base, 'POST', '{"__proto__":{"polluted":1}}');
+  ok(r77Evil.status === 400 && r77Evil.json?.error === 'forbidden-key',
+    `B.7-7 失败路径 原型键 ⇒ 400 forbidden-key(实际 ${r77Evil.status}/${JSON.stringify(r77Evil.json)})`);
+  const r77Remote = await callBg(apiB77.base, 'POST', { provider: 'evil', model: 'evil' }, { 'x-forwarded-for': '203.0.113.9' });
+  ok(r77Remote.status === 403 && r77Remote.json?.reason === 'local-only',
+    `B.7-7 失败路径 非本机 ⇒ 403 local-only(实际 ${r77Remote.status}/${JSON.stringify(r77Remote.json)})`);
+  eq(b77Calls.length, callBeforeBad, 'B.7-7 三次失败后 settings.update **一次都没发生**(0 写)');
+  // ③ lastMode / saveSelection:整段 0 次;mode 子树逐字未变
+  eq(b77Spy.saveSelectionCalls.length, 0, 'B.7-7 saveSelection 调用 0 次(成功与失败路径整段)');
+  eq(b77Calls.filter((p) => p && typeof p === 'object' && Object.keys(p).includes('mode')).length, 0,
+    'B.7-7 没有任何一次 settings.update 带 mode 键 ⇒ lastMode 写面 0 次');
+  eq(JSON.stringify(b77Settings.get().mode), modeBefore, 'B.7-7 settings.mode(默认 ⊕ 补丁)逐字未变');
+  eq(JSON.stringify(b77Settings.user?.mode ?? null), userModeBefore, 'B.7-7 盘上 user.mode 逐字未变');
+  eq(JSON.parse(readFileSync(b77File, 'utf8'))?.user?.mode ?? null, null,
+    'B.7-7 settings.json 里仍然一个 mode 键都没被写出来');
+  await apiB77.close();
+}
+// ⑩ B.5-3 / B.5-4(M21-6 / D-3,ALIGN-v7 §4.4/§4.6):GET `/model/background` 的 `lastError` 回显
+//    · kv 有值 ⇒ **四字段(provider/model/error/at)原样**回显,一个字段不解释、不分类;
+//    · kv 里 JSON 被写坏 ⇒ 仍 200 且 `lastError:null`(**回显自身不许 500**);
+//    · 响应正文里**不许**出现 `unreachable` / `model-rejected` / `empty` 这类分类学字样
+//      (D-3 只说"最近一次失败是什么",不回答为什么;原因诊断属 `V1\PROBE` 立项)。
+{
+  const bgKv = new Map();
+  const apiErr = await wireBackground(bgSettings, PLAT, bgKv);
+  const ERR_REC = { provider: 'p', model: 'm', error: 'model x not found', at: '2026-11-15T17:00:00.000Z' };
+  bgKv.set('llm.background.lastError', JSON.stringify(ERR_REC));
+  const rErr = await callBg(apiErr.base, 'GET');
+  ok(rErr.status === 200, `B.5-3 kv 有记录时 GET ⇒ 200(实际 ${rErr.status}/${rErr.text.slice(0, 200)})`);
+  eq(rErr.json?.lastError, ERR_REC, 'B.5-3 lastError 四字段(provider/model/error/at)原样回显');
+  for (const word of ['unreachable', 'model-rejected', 'empty']) {
+    ok(!String(rErr.text).includes(word), `B.5-3 响应里没有分类学字样 ${word}`);
+  }
+  // 坏 JSON:GET 仍 200、lastError 回落 null —— 回显路径自己不许抛(否则面板拿到 500)
+  bgKv.set('llm.background.lastError', '{"provider":"p",');
+  const rBad = await callBg(apiErr.base, 'GET');
+  ok(rBad.status === 200, `B.5-4 kv 里 JSON 被写坏 ⇒ GET 仍 200(实际 ${rBad.status}/${rBad.text.slice(0, 200)})`);
+  eq(rBad.json?.lastError, null, 'B.5-4 坏 JSON ⇒ lastError:null(不许 500、不许把原始串抛给面板)');
+  // 合法 JSON 但不是四字段形状:同样按"没有可回显的记录"处理(否则前端拿到字符串去读 .error)
+  bgKv.set('llm.background.lastError', '"boom"');
+  eq((await callBg(apiErr.base, 'GET')).json?.lastError, null, 'B.5-4 合法 JSON 但非对象 ⇒ lastError:null');
+  // ⑪ B.5-5 的**HTTP 半边**:sink 未注入(测试环境)时,GET 走同进程回落 `llmLastError()`
+  //     —— "有失败记录就能回显",不依赖落盘这一条路径。
+  const { llmOnce, setLlmErrorSink, llmLastError } = await imp('lib/host/deepsummary.js');
+  setLlmErrorSink(null);
+  const failCtx = { get: (n) => (n === 'llm' ? { stream: () => { throw new Error('no such model'); } } : undefined) };
+  let threw = null;
+  try { await llmOnce(failCtx, { system: 's', text: 't', provider: 'fp', model: 'fm' }); } catch (e) { threw = e; }
+  ok(threw && threw.message === 'no such model', 'B.5-5 未注入 sink 时 llmOnce 仍照原样抛错(不吞)');
+  const fallback = llmLastError();
+  ok(fallback && fallback.provider === 'fp' && fallback.model === 'fm' && fallback.error === 'no such model'
+    && typeof fallback.at === 'string' && fallback.at !== '',
+  'B.5-5 llmLastError() 有同进程记录: ' + JSON.stringify(fallback));
+  bgKv.delete('llm.background.lastError');
+  const rFb = await callBg(apiErr.base, 'GET');
+  eq(rFb.json?.lastError, fallback, 'B.5-5 sink 未注入 ⇒ GET 走 llmLastError() 回落同样能回显');
+  setLlmErrorSink(null);       // 收尾:模块级单例不许带着本段的桩离开
+  await apiErr.close();
+}
+await apiBundle.close();
+
 await api1.close();
 await api2.close();
 process.env.DSH_HOME = realDshHome;

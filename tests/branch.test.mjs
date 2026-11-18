@@ -599,13 +599,15 @@ for (const p of postOnlyNow) {
     check(csrc.includes("'你定型时写下的承诺句是:\\n「' + hintPhrase + '」\\n\\n手术前请郑重地亲手敲一遍以确认(输入框禁粘贴,逐字敲出)。'"),
       '7.9 客户端:**本机**那条提示**逐字未变**(hintPhrase 命中时走的还是原来那句)');
 
-    // ── 渠道判据的**单一来源**源码护栏:三条读面都必须走同一个 `readIsLocal`,不许各写一份代理头判断 ──
+    // ── 渠道判据的**单一来源**源码护栏:各读面与两个"本机"写面都必须走同一个 `readIsLocal` ──
+    //   M24b 起 `/mode/toggle` 全局半边**不再**走本机判据(远端允许),第 6 处调用已移除。
     const apiSrc79 = readFileSync(join(root, 'lib/host/api.js'), 'utf8');
     check(/const readIsLocal = \(req\) => isLocalSurgeryRequest\(req\?\.headers\);/.test(apiSrc79),
       '7.9 护栏:渠道判据 = surgery.js 的 isLocalSurgeryRequest(「无代理头 **且** 带 UA」),'
       + '与守卫⑤ / surgery-local-only 同源 —— 不是在 api.js 里另写一份 IP / UA 判断');
-    check((apiSrc79.match(/readIsLocal\(/g) || []).length === 3 && /const readIsLocal = \(req\) =>/.test(apiSrc79),
-      '7.9 护栏:readIsLocal =「1 处定义 + 恰好 3 个读面调用」(state / persona-history / export;实测调用 '
+    check((apiSrc79.match(/readIsLocal\(/g) || []).length === 5 && /const readIsLocal = \(req\) =>/.test(apiSrc79),
+      '7.9 护栏:readIsLocal =「1 处定义 + 恰好 5 个调用」(state / persona-history / export / '
+      + 'model-background / mode-effort;实测调用 '
       + ((apiSrc79.match(/readIsLocal\(/g) || []).length) + ' 处)');
     // ⚠️ **判据本体的源码护栏**(2026-10-01 晚加):防"将来被优化掉" —— 两条命门都必须逐字在位。
     //   只钉"两条都在",不钉实现细节:改写成等价写法(如拆成两个函数)时这两条仍应为真,

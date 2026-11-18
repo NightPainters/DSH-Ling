@@ -49,7 +49,7 @@ try {
     { codeRoots: [source] }, { officialUrls: ['http://example.com/'] },
     { officialUrls: ['https://127.0.0.1/'] }, { officialUrls: ['https://u:p@example.com/'] }]) {
     throws(() => normalizeLibraryConfig(bad), 'invalid runtime config rejected');
-    // F10:插件配置这条路**不再抛**(抛 = 记忆 / 人格 / 11 件工具一起不加载),改为把原因带进 config。
+    // F10:插件配置这条路**不再抛**(抛 = 记忆 / 人格 / 12 件工具一起不加载),改为把原因带进 config。
     //   界线:严格在里(normalizeLibraryConfig 照旧抛)、降级在外(Config 收住并记录)。
     const degradedCfg = Config({ library: bad });
     yes(String(degradedCfg.library.configError ?? '').length > 0,
@@ -142,7 +142,7 @@ try {
     return { ctx, listeners, specs, routes, sections, close };
   }
   const f = fixture(join(dir, 'entry-normal'));
-  eq(f.specs.size, 11, '8 existing + 2 library tools + deep_item(B 档)');
+  eq(f.specs.size, 13, '8 existing + 2 library tools + deep_item(B 档) + ling_anchor(自述锚) + ling_veto(M5)');
   yes(f.routes.has('/api/dsh-ling/library/status'));
   yes(f.routes.has('/api/dsh-ling/health'), 'memory gateway retained');
   yes(f.sections.length > 0, 'memory injection retained');
@@ -154,19 +154,19 @@ try {
   // 1.7.3 U1:子代理**不该**白拿记忆工具(含 branch_edit / deep_item 写面)。
   //   宿主侧无解:`dsh-tools` 的 `own` 层永远可见(`index.js:2987`),restrict 遮不住,
   //   对 scope-local 名下 deny 还会直接抛错 ⇒ 只能在注册期判掉。故这里把 1.7.2 的
-  //   "子代理拿到 11 件"基准**反转**,并补一条顶层反例,确保不是"把能力一起删了"。
+  //   "子代理拿到 12 件"基准**反转**,并补一条顶层反例,确保不是"把能力一起删了"。
   const scoped = new Map();
   const agentCtx = { tools: { register(spec) { scoped.set(spec.name, spec); return () => scoped.delete(spec.name); } } };
   for (const listener of f.listeners.get('agent/created') ?? []) {
     listener({ agent: { ctx: agentCtx, session: { id: 'test-subagent', header: { origin: 'subagent' } } } });
   }
-  eq(scoped.size, 0, 'U1:子代理不注册任何器灵工具(11 件一件都不给)');
+  eq(scoped.size, 0, 'U1:子代理不注册任何器灵工具(12 件一件都不给)');
   const topScoped = new Map();
   const topCtx = { tools: { register(spec) { topScoped.set(spec.name, spec); return () => topScoped.delete(spec.name); } } };
   for (const listener of f.listeners.get('agent/created') ?? []) {
     listener({ agent: { ctx: topCtx, session: { id: 'test-top', header: {} } } });
   }
-  eq(topScoped.size, 11, 'U2 反例:顶层会话仍拿满 11 件(含 library 两件 + deep_item B 档)');
+  eq(topScoped.size, 13, 'U2 反例:顶层会话仍拿满 13 件(含 library 两件 + deep_item B 档)');
   eq((await topScoped.get('library_search').execute({ q: 'entry-only-token' }, {})).items[0].id, wiredItem.id);
   eq((await topScoped.get('library_check').execute({ id: wiredItem.id }, {})).state, 'ok');
   // fork 必须照常绑(fail-open):它是主人的并行工作线,不是子代理。
@@ -175,18 +175,18 @@ try {
   for (const listener of f.listeners.get('agent/created') ?? []) {
     listener({ agent: { ctx: forkCtx, session: { id: 'test-fork', header: { parentSession: 'test-top' } } } });
   }
-  eq(forkScoped.size, 11, 'U1:分叉会话(fork)照常绑定 —— 闸只对 subagent');
+  eq(forkScoped.size, 13, 'U1:分叉会话(fork)照常绑定 —— 闸只对 subagent');
   await f.close();
   eq(f.specs.size, 0); eq(topScoped.size, 0, 'agent tool disposers collected'); eq(forkScoped.size, 0, 'fork disposers collected');
   eq(f.routes.size, 0);
   eq((await searchTool.execute({ q: 'entry-only-token' }, {})).reason, 'closed');
 
   // F10(修前这里是:`throws(() => entry.apply({}, {…, library: { codeRoots: ['relative'] } }))` ——
-  //   一个写错的 library 键把**整插件**打掉:记忆 / 人格 / 11 件工具一起不加载,连排查面都没有)。
+  //   一个写错的 library 键把**整插件**打掉:记忆 / 人格 / 12 件工具一起不加载,连排查面都没有)。
   //   修后:响亮降级 —— **只废掉图书馆这一块**,其余照常。
   const badEntryPath = join(dir, 'entry-bad-config');
   const badEntry = fixture(badEntryPath, { library: { codeRoots: ['relative'] } });
-  eq(badEntry.specs.size, 11, 'F10:library 配置写错时 11 件工具照常注册(没被连坐)');
+  eq(badEntry.specs.size, 13, 'F10:library 配置写错时 13 件工具照常注册(没被连坐)');
   yes(badEntry.routes.has('/api/dsh-ling/health'), 'F10:记忆网关路由照常');
   yes(badEntry.sections.length > 0, 'F10:人格/记忆注入段照常');
   eq((await badEntry.specs.get('library_search').execute({ q: 'x' }, {})).reason, 'library_config_invalid');
@@ -195,7 +195,7 @@ try {
   const degradedPath = join(dir, 'entry-degraded'); mkdirSync(degradedPath);
   writeFileSync(join(degradedPath, 'library.db'), 'invalid SQLite');
   const degraded = fixture(degradedPath);
-  eq(degraded.specs.size, 11, 'library failure does not remove memory tools(+ deep_item)');
+  eq(degraded.specs.size, 13, 'library failure does not remove memory tools(+ deep_item + ling_veto)');
   yes(degraded.sections.length > 0, 'library failure does not remove memory injection');
   eq((await degraded.specs.get('library_search').execute({ q: 'x' }, {})).reason, 'library_unavailable');
   yes(existsSync(join(degradedPath, 'memory.db')));
@@ -301,7 +301,7 @@ try {
   {
     const f17 = fixture(join(dir, 'f17-entry'));
     const measured = f17.specs.size;
-    eq(measured, 11, 'F17:实测注册工具数(不采信注释自报)');
+    eq(measured, 13, 'F17:实测注册工具数(不采信注释自报)');
     const idxSrc = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
     // 逐字锚:apply() 的失败注释要写清"一起没了"的有多少件工具。
     // 这条判据的意义不在"11"这个字面 —— 而在**下次加工具时不会漏改**(与 F1 同类:

@@ -108,7 +108,7 @@ const toolLibrary = {
 const reg = registerLingTools(toolCtx, { gate: { snapshotIds: () => [] }, memory: { kvSet() {} }, settings: {}, library: toolLibrary });
 const searchTool = toolReg.find((s) => s.name === TOOL_LIBRARY_SEARCH);
 const checkTool = toolReg.find((s) => s.name === TOOL_LIBRARY_CHECK);
-check(reg.ok === true && toolReg.length === 11, '十一个工具都注册上了(旧八 + 两个图书馆 + 深层库落条/作废)');
+check(reg.ok === true && toolReg.length === 13, '十三个工具都注册上了(旧八 + 两个图书馆 + 深层库落条/作废 + 自述锚 + 人格层否决权)');
 check(!!searchTool && !!checkTool, '两个图书馆工具在册');
 const sOut = await searchTool.execute({ q: 'GB/T', limit: 5 }, {});
 check(sOut.ok === true && toolSaw.searches.length === 1 && toolSaw.searches[0].limit === 5, 'search:参数原样交给运行时');

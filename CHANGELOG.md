@@ -2,6 +2,161 @@
 
 本项目遵循语义化版本:`MAJOR.MINOR.PATCH`。
 
+## 2.0.0
+
+> **2.0 正式版**。内容 = `2.0.0-rc.5` 的全部行为 + 文档收口：README 中英双语、手术门截图移到「快速开始」前、记忆全景与枝嵌套说明、v11 理念增补、对外口径 §8。
+> **发布状态**：以 npm `latest` 为准；本版发布后 `latest` 应为 `2.0.0`。金丝雀在 `rc.5` 上通过（2026-11-16），本版代码与 `rc.5` 一致。
+
+- **主要能力**：时间锚（T）· presence 只读接口（P）· 自知（N）· 记忆锚（M）· 人格层否决权（V）· 导出/导入/关系定位（1.9）· 档位可配（E2）· 记忆树第 4 层（会话节点）。
+- **文档**：README 中英双语（`README.md` / `README.en.md`）；四张截图收为一张手术门图；「三层记忆」明确为注入面；枝可继续挂枝、深度与数量无硬上限；理念 v11 增补与对外口径 §8。
+- **测试/打包**：`npm test` 70 段 exit 0；`npm pack` 按 `package.json.files` 白名单与源树对账，tarball 内 `package.json.version` 为 `2.0.0`。
+
+---
+## 2.0.0-rc.5
+
+> **2.0 的第五个候选包(`rc.5`)**:在 `rc.4` 之上做**一处行为面收口** —— `POST /mode/toggle` 的**全局半边**从手术门降为 **`confirm:true` + 宿主认证(远端允许)**;模型/provider 原样,只换推理档位与新会话默认模式;门清单随之 **15 → 14**。不动 persona/否决面、不动 client、不开新端点。
+> **发布状态**:`2.0.0-rc.5` 是**候选** —— **未发 npm、未装真机、未重启 live**;发布状态一律以 npm `latest` 为准(当前 `latest` 仍是 1.7.3)。
+> **用户可见行为变化(必读)**:远端(已认证)也能设定新会话的默认模式;全局切换**不再弹承诺句**。
+
+- **全局 `/mode/toggle` 从手术门降为 `confirm:true` + 宿主认证(远端允许)**:全局半边(无 `sessionId` / `defaultOnly:true`)**不再过手术门** —— **不要票据、不要承诺句、不要本机限制**;判据只剩 `confirm:true` + 宿主认证(`guard` 那层)。因此**远端(已认证)也能切**,不再有 `local-only` 一刀切。写面是 `settings.update({mode:{lastMode:…}})` + `saveSelection(...)`,**不进** `surgery-*.jsonl`。
+- **模型/provider 原样(A)**:全局半边**只换两样** —— `reasoningEffort`(取 `mode.mapping.<mode>.effort`)与 `mode.lastMode`;`provider`/`model` 一律取**平台当前选择**(`currentModelSelection`),读不到就**不写**(判 `unknown-current-model`),**不替你选模型**。
+- **会话半边不变(B)**:带 `sessionId` 的 work/life 切换仍**免门**(rc.4 起如此)、仍只改本会话、仍**不写**全局 `mode.lastMode`;两半边都不进手术日志。
+- **门清单 15 → 14(C)**:`lib/host/surgery.js` 覆盖面清单 **14 行**(`/mode/toggle` 原第 15 行移出);`if (!gateSurgery(` **非注释调用点 15 → 14**(实测 14 处:`2363/2703/2735/2761/2804/2848/2890/2936/3105/3144/3545/3614/3664/3823`);测试护栏 `tests/settings-write-faces.test.mjs` 的 `EXPECTED_GATE_CALLS` 由 **15 改为 14**。⚠️ `surgery.js` 里"清单 14 行 + 1 行例外(`/inject`)= 15 条注入面写面"是**另一套口径**,本次**没动**。
+- **行为变化(必读)**:① 远端(已认证)也能设新会话默认模式(rc.4 里那是 403 `local-only`);② 全局切换**不再弹承诺句**、不再要票据;③ 客户端 `client.js` 在 `reason==='sealed'` 时的弹句分支对全局半边成为死路(未改,按范围不动)。
+- **测试/打包**:测试链 **69 个 `tests/*.test.mjs`**(连 `tests/unit.mjs` 共 **70 段**;`EXPECTED_SEGS=70` / `EXPECTED_DISK_TESTS=70`),`npm test` **exit 0**;写面源级枚举 `tests/settings-write-faces.test.mjs` **232/232 条断言通过**(`[GREEN] failures=0`;rc.4 节里的 235 是陈旧数字,本版按实测写);打包口径仍是**包=树**(`npm pack` 产物按 `package.json.files` 白名单与源树逐文件 SHA256 对账,tarball 内 `package.json.version` 须为 `2.0.0-rc.5`)。
+- **边界(如实写)**:本版是**测试台上的候选包** —— 没有发 npm、没有上真机、没有重启 3080、没有改 live profile。另有一条必须同页写清:`_crew\reports\m24b-review\review.md` 的 F1–F9(**注释/测试注释/计数/文档措辞**级 must-fix:两处注释与六处测试注释仍写"仅本机"、11 处 `第 N/15 条写面` 分母、`CHANGELOG` 的 235、`api.js:2254` 行号引用、`_lab\` 归位)**未在本版落地** —— 本卡只做打包口径(版本号 / CHANGELOG / README / 打包对账),按范围不动产品代码与测试;逐条位置见该评审报告与本包 `M24b-PACKAGE.md` 的"未落地项"。
+
+---
+
+## 2.0.0-rc.4
+> **2.0 的第四个候选包(`rc.4`)**:在 `rc.3` 之上做**四处行为面改动** —— mode 门拆分、`lastMode` 解耦、后台默认模型设置(含坏值最小回显)、推理档位滑块(`/mode/effort` 轻确认);另加测试面收口(写面枚举进链)。
+> **发布状态**:`2.0.0-rc.4` 是**候选** —— **未发 npm、未装真机、未重启 live**;发布状态一律以 npm `latest` 为准(当前 `latest` 仍是 1.7.3)。
+> **用户可见行为变化(必读)**:新会话**不再**跟随"上次切到的 work/life",而是跟随**显式默认**;会话内切换只改本会话。
+
+- **mode 门拆分(A · 会话切换免门)**:`POST /mode/toggle` 的**会话分支**不再过手术门 —— 带 `sessionId` 的 work/life 切换**免票即生效**(只改本会话的 `selectModel`/`setSessionMode`/invalidate/stale);**`!sessionId` 全局分支仍过门**(判据是 `api.js` 的 `!sessionId`,即 `defaultOnly:true` **或无最近会话**,不是 `defaultOnly` 单独取值),全局分支的票据/承诺句/留痕口径一字未改。`api.js` 里 `if (!gateSurgery(` 实测 **15** 处(16 − 会话半边),逐处对应 `settings` 写面枚举表。
+- **`lastMode` 解耦(B · 只有全局分支写)**:会话内 work/life 切换**不写** `mode.lastMode`、**不写** `mode.mapping`;**只有 `!sessionId` 全局分支**写 `lastMode`(语义变成"新会话默认用哪个模式",不再由"上次切了什么"隐式改写)。同批落点:`mode.js` 默认 `setDefault:false`、`api.js` 会话路径显式 `{setDefault:false}`、`mode.test.mjs` / `mode-service.test.mjs` 两条正向断言改为"逐字未变"。滑块/`/mode/effort` 改的是**全局默认档位**(`mode.mapping.<mode>.effort`),会话切换不影响它。
+- **后台默认模型设置(C)**:设置里新增"后台自动推进(深摘/成长/习惯等)用的默认模型";`llmOnce` 取模型的顺序是**显式入参 → 设置 → 平台当前选择 → fallback**,无设置时行为与 `rc.3` 逐字相同。`llmOnce` 失败时把 `{provider, model, error, at}` 落到**新键** `llm.background.lastError`(`error` 截到 200 字符,`GET /model/background` 原样回显"最近一次失败");**不复用** `llm.probe`(它仍是自动深摘的闸),**不做**自动降级、不改探针。写面:`POST /model/background` **不过手术门**,仅本机 + 类型校验 + 拒 `__proto__`/`constructor`/`prototype`。
+- **`/mode/effort` 轻确认 + 记忆中心滑块(D)**:**只收** `work|life` 与 `off|low|high|max`;不带 `confirmEffort:true` ⇒ `200 {ok:false, reason:'confirmation-required', applied:'none', mode, effort:{from,to}}` 且 **0 写**;带确认才落笔。这是主人的显式设置动作:**不进** `surgery-*.jsonl`、不敲承诺句。端点仍**仅本机**。UI 落点在「记忆与数据中心 → 概览与数据」页,4 档人类可读标签 **省电 / 均衡 / 深入 / 极致**(对应 `off / low / high / max`),键盘可达,写入即刷新后保持。
+- **测试/打包**:测试链 **69 个 `tests/*.test.mjs`**(连 `tests/unit.mjs` 共 **70 段**;`tests/package-chain.test.mjs` 的 `EXPECTED_SEGS=70` / `EXPECTED_DISK_TESTS=70`,显式排除 1 个),`node tests/package-chain.test.mjs` **exit 0**;写面源级枚举 `tests/settings-write-faces.test.mjs` **235/235 条断言通过**(`[GREEN] failures=0`,235 是运行时计数,删一项登记分母即变);打包口径仍是**包=树**(`npm pack` 产物按 `package.json.files` 白名单与源树逐文件 SHA256 对账,tarball 内 `package.json.version` 须为 `2.0.0-rc.4`)。
+- **边界(如实写)**:本版是**测试台上的候选包** —— **没有**发 npm、**没有**上真机、**没有**重启 3080、**没有**改 live profile;`rc.4` 的 tarball 与私有仓库推送(`NightPainters/DSH-Ling-test`)在 M23 打包任务里执行,本节的测试数字只覆盖源码树上的实测结果。
+
+---
+
+## 2.0.0-rc.3
+
+> **2.0 的第三个候选包(`rc.3`)**:在 `rc.2` 之上闭合审计抓到的**真 must-fix F4**(撤锁即豁免)+ 测试面加固(测试链包含性护栏、多字段文案、§14.1/§14.2 断言)。落点仍是**否决权**,不新增对外键、不改数据结构;但 F4 的修法**是一条对外行为变更**(见第一条)。
+> **发布状态**:`2.0.0-rc.3` 是**候选** —— **未发 npm、未装真机**;发布状态一律以 npm `latest` 为准。
+
+- **F4(must-fix)· 撤锁不再能夹带被否决的字段(记录感知版)**:修前撤锁分支(`surgery.js` 的 `unsealing && !outOfGate`)只判"有没有在挂记录",**从不看本次请求里除 `sealed` 还带了什么** —— 于是 `{sealed:false, aiTitle:'F4-PWN'}` + `confirm` 会拿到 `unsealForceToken`,第 2 跳带 token 即 `ok:true`(`decision:'veto-unseal-forced'`),`/persona` handler 随即 `settings.update(patch)` ⇒ **一次请求同时撤锁并写任意 persona 字段**,绕过该字段上的 pending/vetoed,而那条记录**仍是 pending**(不消费、不落痕,复盘看不出绕过)。现在:撤锁这一跳若**夹带了正被 active 否决记录覆盖**的 persona 键,直接拒(`reason:'veto-unseal-extra-keys'`,新常量 `VETO_REASON_UNSEAL_EXTRA`),**在发第一枚 `unsealForceToken` 之前**、`wrote:false`、kv 不留新 `hist`。
+  - **口径(必须读准)**:采用 CEO 裁决的**变体①′(记录感知)**,**不是**"撤锁只许单键"的严格版 —— **撤锁可以携带未被否决覆盖的其它 persona 键,但不得携带被 active 否决覆盖的键**。理由:面板「重归摇篮」发的是**整份人格表单**(`collect()` 的 7 个 persona 键)+ `sealed:false`(`client.js:2102` → `saveWith`),严格版会在**没有任何否决记录**时也 100% 打死这个手动按钮。判据因此是 `keys ∩ (active 记录的 fields)`,而不是 `keys − {sealed, sealPhrase}`;**没有 active 记录时一个键都不拦**,既有路径一字不变。
+  - **体验后果(用户会看到什么)**:若**有在挂的否决记录**、且它覆盖了表单里的某个键,面板「重归摇篮」会被拒 —— 用户看到的是 `保存失败:<message>`(`client.js:2120` 的 toast),面板**仍停在锁定态**,`sealed` 不变,记录仍 `pending`。这是判据的必然结果、**不是 bug**:此时先单独撤锁(只发 `{persona:{sealed:false}}`,不夹带被覆盖的键),或先处理那条否决。**没有**在挂记录时不受影响(整表单照旧 `ok:true`)。
+  - **`/persona` handler 侧不加同规格严格守卫**(`api.js` 只加了一段注释说明理由):那会按"多键即拒"判,同样打死面板按钮;而 sealed 态下输入本就被禁(`client.js:1944-1951`),那些额外键的值等于已存值 ⇒ 只会得到"保存失败",拿不到安全收益。
+  - **这一条是行为变更**:以前"撤锁 + 同时改字段"能一次过(这正是 F4 的绕过路径),现在被拒并给出可执行出路(先单独撤锁,或先处理这些字段的否决)。
+  - **未变(同族残余面,如实写)**:`/persona/rollback` 与 `/import`（`parsed.persona === true` 时）走 `whole:true` 整包回写,交参是 `patch:{}` ⇒ 进不了这条撤锁分支(回滚到"定型前快照"本身就是合法整包写,且仍要两跳 `confirm` 并留 `veto-unseal-forced` 痕)。rc.3 **不**改变它的口径。
+  - **未变(残余面二 · 不止 rollback/import,如实写)**:同一次撤锁请求仍可携带**不被否决面覆盖**的其它 persona 键,并随同一次 `settings.update` 落库 —— `styles.work`/`styles.life`、`tone`/`toneWork`/`toneLife`、`language`、`extraLore`、`enabled`、`habitsPending`、`ruleMeta`(它们在 `PERSONA_PATCH_KEYS` 白名单里可落库,但**不在** `VETO_PERSONA_KEYS` 这 10 键内 ⇒ 否决面看不见、本守卫也不拦:守卫只看 `keys ∩ active 记录的 fields`)。其中 **`enabled:false` 单独点名**:它是「人格离场」的旧别名 ⇒ 一次带 `sealed:false` 的请求可以**同时撤锁并让人格离场**。**本版保持不变、是否收窄未裁决**(收窄成"撤锁只许单键"会打死面板按钮;要不要另立一张"撤锁可夹带键"的正面清单尚未裁决),套件里也**没有**这条的断言 —— 下一个人若要动它,请先裁决口径,别把它当新漏洞重报。
+- **回归用例(§14.8 / 14.8b / 14.8c / 14.8d / 14.8e)**:① pending `aiTitle` + 同包 `{sealed:false, aiTitle}` + confirm ⇒ `veto-unseal-extra-keys`、`aiTitle`/`sealed` 不变、记录仍 `pending`、**无 `forceToken`**、kv 无新 `hist`(第 2 跳带任何 token 同样拒);② **面板整表单**(7 键 + `sealed:false`)**无任何 active 记录** ⇒ `ok:true`(手动「重归摇篮」不许被误杀);③ 同一份面板整表单 + active `aiTitle` ⇒ 拒且 `extraKeys` **只点名被覆盖的那一个**键;④ **单独** `{sealed:false}` + confirm/token(**有** active 记录)⇒ 仍两跳成功、照旧 pin 记录;⑤ 撤锁之后写 `aiTitle` ⇒ 仍被 pinned 记录拦,未覆盖字段照旧放行。另做了两次变异复核:把守卫短路 ⇒ ①③ 红且红得正是修前的形状(发 token / hist 2);把判据换成严格版 ⇒ ②红。两次变异后均还原(`restored_identical=True`)。
+- **测试链包含性护栏(新套件 `tests/package-chain.test.mjs`,S7)**:`package.json` 的 `scripts.test` 是**手写清单**,删一段是零成本的,而 CHANGELOG 里那句"66 段"还会让数字看起来自洽。新套件**从磁盘反查清单**:①链上每段 `tests/*.mjs` 都在磁盘上;②磁盘上每个 `tests/*.test.mjs` 都在链上(唯一例外是**显式白名单 + 理由**:`time-t2.0.test.mjs` 的头部自述说它不进链,本版实测它单独跑 = exit 0,故按"可随时提升的手工套件"登记,而不是静默漏);③`tests/unit.mjs` 在链上;④关键套件与**护栏自己**在链上。白名单条目还须满足"文件存在 + 不在链上 + 理由非空",否则红(白名单不许腐烂)。**m19-fix 补两个静默口(MF-2)**:⑤**大小判据** —— 链段数与磁盘 `tests/*.test.mjs` 数各钉一个**常量**(`EXPECTED_SEGS` / `EXPECTED_DISK_TESTS`),否则"把某个非关键套件文件连同它的链段一起删掉"集合仍一致 ⇒ 旧版全绿;⑥**理由属实** —— 被 `EXCLUDED` 排除的文件必须自己在头部 40 行内写"不进"链,否则红(光写 10 个字不能再排除任意新文件)。这两个常量是**故意手写**的:改它 = 一次需要 review 的动作。
+- **多字段文案(§14.9)**:`§14.3` 只用**单字段** `['aiTitle']` 做字面量 oracle ⇒ `allowed.join('/')` 的分隔符从未出现在断言里(改成 `' / '` 不会红)。新增用例把**两字段**的两条 `veto` 出口都钉成逐字:`veto-scope` ⇒ `…（aiTitle/userTitle）。`;**撤锁夹带** ⇒ `撤锁（sealed:false）夹带了正被否决覆盖的字段：aiTitle / userTitle —— …`(不许互换分隔符)。
+- **§14.1 / §14.2 断言加固**:§14.1 把 `ok` 与 `reason` **拆成两条**断言(同一条 `check` 兼两个判据 ⇒ 单点弱化即可静默降级),`allowed`/`got` 从"只断长度"改成**逐字**,并补 `message` 与"零写入(仍 pending / hist 1 条 / 无 token)";§14.2 补**第 1 跳的 kv 终态**(仍 `pending`、hist 恰 2 条且第 2 条 `pending-force-requested`、只多一枚 `pendingForceToken`、无 `unsealPinned`)、**第 2 跳的 `hist` 第 3 条**、以及 **`afterDigest` 精算**(`personaDigest({...当前人格, ...本次 10 键})` + `afterDigestKnown:true`),并断言**两跳期间 `settings` 一个字节没动**。(编号说明:早前草稿把这批加固叫作"§14.10",但 `tests/veto.test.mjs` 里没有 `▶ 14.10` 段 —— 实体是 §14.1/§14.2 两段内的加固,本版按实际段落命名。)
+- **"零写入/零落库"从恒真断言改成可失败判据(m19-fix · MF-1)**:修前 `tests/veto.test.mjs` 里那几条 `state.persona.aiTitle === '器灵' && sealed === true` 是**恒真**的 —— `vetoConsume` 全文零处 `settings.update`,左侧永不可能为假(审计 S5「可被 `check(true)` 空转」换了个形状复发;变异日志自证:删掉守卫后那几条仍绿)。现在:①`mkSettings()` 的 `update` 数写点(`stats.updateCalls`),"零落库"变成真计数;②按 `api.js:2238-2267` 的顺序复刻 handler(`vv.ok===false ⇒ 直接拒、不写`)后再断 —— **删掉守卫整块 ⇒ 第 2 跳变 `ok:true` ⇒ 这条红在"零落库"上**;③新增 **§14.8f** 机械断言:`/persona` 块里必须"`vetoConsume` ⇒ `if (!vv.ok) return vetoReject` ⇒ `settings.update`"且写点**唯一**(删拒门 / 把写点提前,都红)。同批订正 §14.8 一条**不具区分力**的断言文案(修前也是 `ok:false`,只是带 token;真实区分点是 `reason`/token/`hist`)。
+- **测试段数(口径)**:**68 段**(`tests/unit.mjs` + 67 个 `tests/*.test.mjs`),计数口径 = `package.json` 的 `scripts.test` 里按 `&&` 切开的段数;新增 1 段(`package-chain`)。⚠️ 此前 `rc.1` 节里写的两次「66 段」与当时实测(67 段)不符,是陈旧数字 —— 本版按新口径给出实数,并不再回改历史节。
+
+---
+
+## 2.0.0-rc.2
+
+> **2.0 的第二个候选包(`rc.2`)**:在 `rc.1` 之上闭合审计残留的 **R1 / R3 / R2-A** 三项 —— 落点是**否决权的范围判据**、**回执文案**与**整包强制的回归用例**,不新增对外键、不改数据结构。
+> **发布状态**:`2.0.0-rc.2` 是**候选** —— **未发 npm、未装真机**;发布状态一律以 npm `latest` 为准。
+
+- **R1 · 单键覆盖 → 多键超集(§14.1 / §14.5)**:原先"这次改的键是否都在否决记录覆盖范围内"只按**单键**读;新增 §14.1 钉住**多键超集**语义 —— 新守卫用 **`every`**(本次每个键都被该记录覆盖才算命中),终态查找用 **`some`**(任一键重叠即认作同一条记录),两者**分叉**:`every` 侧由 §14.1 钉住(用例:记录 X 只覆盖 2 键、本次 patch 3 键 ⇒ `veto-scope`);`some` 侧由 §14.5 钉住(用例:记录覆盖 `aiTitle+userTitle`、本次**不带 id** 只写 `aiTitle` ⇒ `veto-pending`,把 `some` 改成 `every` 立刻红)。§14.2 另钉住"无 id 的 10 键整包两跳"。
+- **R3 · 两处 `veto-scope` 文案统一(§14.3 / §14.4)**:`lib/host/surgery.js` 现在只有 `vetoScopeMessage()` **一处**文案定义,新守卫出口与 approved 内置范围出口**共用同一句**(基线里是两句不同的话);改**文案**两段一起红(§14.3 不带 id / §14.4 带 id 逐字比对);新守卫的**行为**由 §14.4 单独覆盖(带 id + **错 nonce** + 越界 keys ⇒ 守卫在时 `veto-scope`,守卫被删才落到 `veto-nonce`)。
+- **R2-A · 整包强制回归(§14.2)**:**10 键整包、不带 `vetoId`** 的强制覆盖走**两跳** —— 第 1 跳零写入并回 `forceToken`,第 2 跳才执行并记 `veto-overridden-on-pending`;kv 终态一致。另:若还有别的 active 记录盖住剩余键,第 1 跳即 `veto-scope`、不开票(MF-1 / §14.7)。
+
+---
+
+## 2.0.0-rc.1
+
+> **2.0 的候选包(`rc`)**:这一节写的是六组 2.0 内容(T / P / N / M / V / 1.9)+ 随版本发布的「树第 4 层」。
+> **发布状态**:`2.0.0-rc.1` 是**候选** —— **未发 npm、未装真机**;发布状态一律以 npm `latest` 为准。
+> 代码与测试都在本包内:测试链 **66 段**,本候选包打包前实测 `npm test` **exit 0**。
+
+### 一、T · 时间锚四行(`[现在]` / `[本场]` / `[跨天]` + system 锚权威句)
+
+- **`[现在]` 带钟点**:形如 `[现在] 深夜(23:41)` —— 分钟级信息**只进这里**,绝不进 system 前缀(`clock.js:158`、`:173`)。
+- **`[本场]` 跨度**:`已持续 N 天(自 MM-DD HH:MM 起)` / `不足 1 天(自 MM-DD HH:MM 起)`,数据源 `session_meta.started_at`(`clock.js:118`、`:190`)。
+- **`[跨天]` 界线**:仅当 `started_at` 的日历日 ≠ 今天时追加一句(`clock.js:160`、`:194`)。
+- **拼装契约**:段间是**单个 `\n`**,顺序固定 `[现在] → [本场] → [跨天]`;拿不到 `sessionId` / `started_at` 缺失 ⇒ **只出 `[现在]`**,不抛(`clock.js:161-162`)。
+- **子代理 / 未知会话种类**:**只看 `[现在]`** —— 没有 `[本场]`、没有 `[跨天]`,也没有 `[自知]`(`inject.js:315`)。
+- **测试**:`tests/clock.test.mjs` / `tests/clock-skill.test.mjs` / `tests/times.test.mjs` 在测试链上。
+
+### 二、P · 对外接口 `dsh-ling/presence`(v1 契约冻结)
+
+- `ctx.get('dsh-ling/presence')` 取到 `state()` / `watch(fn)` / `recent({ since, limit })` 三个只读方法,**公开面一个键都不多**;拿不到服务**不抛**(软依赖)。
+- `Change` 只有 `kind / at / code / scope / count` 五键,**绝无正文**;`at` 是 UTC ISO。
+- **五码受控词表**(v1 只增不改):`tree.changed` / `memory.forgotten` / `persona.changed` / `settings.changed` / `mode.changed`(`presence-bus.js:34-38`)。
+- 契约原文 / 三铁律 / 四不做的**发布面**在 `PHILOSOPHY.md` 第七章;字段补遗在 `docs/PRESENCE-CONTRACT-ADDENDUM.md`(addendum 只补不改)。
+- **测试**:`tests/presence.test.mjs`(契约九条验收 + 五类写点各至少一条)。
+
+### 三、N · `[自知]` 通知(只走 context 一行)
+
+- 注入面多一行:`[自知] 上次开口之后：<按 kind 聚合>（共 N 条）。`(`inject.js:142`)。
+- **无变更 ⇒ 与冻结基线逐字节相同**;投递即消费(再组装归零、不累加),section 渲染不消费;全局槽 `*` 与会话槽分开。
+- presence 取不到 / 监听器抛错 ⇒ **只剩时钟文本**,不抛(`inject.js:97`)。
+- **测试**:`tests/selfaware.test.mjs`(A / B / C / C2 / D / E / F 七组判据)。
+
+### 四、M · 记忆锚 `ling_anchor`
+
+- 新工具 `ling_anchor`(`list` / `add` / `retract`):写 `origin='ling'` 的条目,**不进开场注入**,检索仍搜得到。
+- **额度是自律闸**:每会话 ≤3、全局 ≤200;被拒时库内行数不变,回执给出 `3/3` 与"腾位"出路。
+- **幂等 = 四元组** `(convId, seqFrom, seqTo, text)`;同前 40 字、不同全文**不得误拒**;`retract` 只标记、不物理删行;写入不发 presence 事件。
+- **测试**:`tests/ling-anchor.test.mjs`(A1–A5 五条验收)。
+
+### 五、V · 人格层否决权(V1)
+
+- **pending 期不生效**:注入文本与 settings 深比较**逐字节不变**;留痕四字段 `{ at, decision, reason, fields }` 且**值不落盘**,另带 `afterDigest`。
+- **强制覆盖必须两跳**(第 1 跳零写入 + 回 `forceToken`,第 2 跳才执行并记 `veto-overridden`);`veto-blocked` 留反向痕;**approved 之后缺票据仍拒**(门独立生效)。
+- **覆盖面**:15 条门面 / 14 条否决面(`/mode/toggle` 只过门、**不享否决权**),由机械断言钉住;工具通道 `ling_veto` 与 HTTP 面同源判据。
+- **测试**:`tests/veto.test.mjs`(六组验收 + 第十一节 MF 补丁)。
+
+### 六、1.9 · 导出 16 表 / 导入归属 / 关系定位
+
+- **导出**:新键 `manifest` + `bundleVersion: 3`(`memory.js:3351`)+ 逐表 16 条(`EXPORT_TABLES`,`memory.js:645`);四个旧字段 `format` / `schemaVersion` / `exportScope` / `includeRaw` **全部冻结**;`kv` 只导白名单前缀,其余进 `kvExtra`。
+- **导入归属**:`identity_scope`(`memory.js:3361`)随包导出;导入侧 `detectImportIdentity()` 判本机 / 外来 / 未知(`memory.js:3427`),逐表回执键集由 `IMPORT_RECEIPT_FIELDS` 单一事实源给出;旧包缺段 ⇒ 回执明说 `missingSegment`。
+- **关系定位三档**:`same-session` / `cross-session` / `unknown`(固定 if 链,`unknown` **先于** `cross-session`;`RELATION_TIERS`,`memory.js:4237-4246`),机器短码 `same-conv` / `same-ns` / `conv-missing` / `unknown-src` 等逐条可判。
+- **测试**:`tests/export-19.test.mjs`、`tests/relation-19.test.mjs`、`tests/library-import.test.mjs`。
+
+### 七、树第 4 层(会话作为节点)—— 随本版本发布,已在真机上
+
+- 树新增第 4 层:某枝下**最近的 N 个 live 会话**,按 `updated_at` 倒序(`memory.js:2104`);枝行尾印「会话 X · 条目 M」,条目只计数、不冒充会话;默认 `maxSessions=0` 的输出**逐字不变**。
+- 状态:**代码已完成**(M1,2026-11-04)、测试在链上(`tests/tree4.test.mjs`),且**已于 2026-11-05 上真机**(转引:该状态写在 `_crew/reports/m0-survey/survey.md:346` 引用的 `STATUS` 三处回写)。
+- 它**不属于**六组施工面,只随本版本发布 —— 写在这里是为了让"已交付项"与"2.0 范围"分得开。
+
+### 八、候选包另含:M8 收口(代码 / 测试)
+
+- **R10**:`packageId` 拼 kv 键前先校验(安全字符集 + 长度上限);非法值只写 `import.last` + 告警码,不产生按包新键。
+- **R11**:导入归属戳移到**所有行循环之后**写,并带 `ok / errors / rows / added / overwritten`;全失败不会长成"成功"形状,整包回滚时戳不前进。
+- **R7 / R8 / R12**:补 `supersededRestored` 的值断言;四元组命中路径不再报幻影 `id` 差异列;`overwrite=true` 的差异路径有覆盖用例。
+- **R9**:补 `includeRaw` / `includeSnapshots` / `includeForgotten` 的反向、单开、三开用例。
+- **D-2**:两份 `_lab/roundtrip.mjs` 删掉字面量 `=== 16`,改成运行期业务表集合与回执键集的**双向对账**。
+- 逐条改法与变异证据见 `_crew/reports/m8-fixcode/impl.md`;测试链仍 **66 段**(未增未减),`npm test` exit 0。
+
+---
+
+## 对外接口(下一大版本 · v1 契约已冻结)
+
+> 本节**不属于任何已发布版本小节**:接口代码已在本包内实现并通过测试,发布随**下一个大版本**。
+> 发布面原文(契约 / 三铁律 / 四不做 / 五码)在 [`PHILOSOPHY.md`](./PHILOSOPHY.md) 第七章「对外接口」的 **§3–§5**。
+
+### 十八、对外接口 `dsh-ling/presence`
+
+- **v1 契约(冻结)**:`ctx.get('dsh-ling/presence')` 取到 `state()` / `watch(fn)` / `recent({ since, limit })` 三个只读方法;`Change` 只有 `kind / at / code / scope / count` 五个键,**绝无正文**;`scope` 缺省 = 影响所有会话;`watch` 返回**退订函数**、回调是**同步**的、坏监听不拖累其余。契约原文(施工单 §3)已逐字落进 [`PHILOSOPHY.md`](./PHILOSOPHY.md) 的契约一节。
+- **五码(受控词表,v1 只增不改)**:`tree.changed` / `memory.forgotten` / `persona.changed` / `settings.changed` / `mode.changed`(`code → kind` 映射与逐 `code` 的 `count` 口径见 PHILOSOPHY 契约一节的两张表)。
+- **三条兼容铁律**:①**消费者必须忽略未知的 `kind` 与 `code`**;②**服务是软依赖** —— `ctx.get()` 拿不到就跳过,**不许抛、不许报错**;③**只增不改** —— 已有字段的语义永不改,要改语义就加新字段。原表见 [`PHILOSOPHY.md`](./PHILOSOPHY.md) 第七章「对外接口」§4(三条兼容铁律)。
+- **四条明确不做**:①🔴**不给"拦截权"**(默认行为"下次聊天注入"永远执行);②**不暴露内容**;③**不暴露内部对象**(不给 `memory` / `gate` / `settings` 句柄);④**v1 不做 ack(回执协调)**。原表见 [`PHILOSOPHY.md`](./PHILOSOPHY.md) 第七章「对外接口」§5(四条明确不做)。
+- **本包内无消费者(消费方在独立模块)**:v1 刻意没有任何公开消费者 —— 感知层"先不发"(甚至可能永远不发),所以它必须窄到"即使永远没人用也不后悔"。
+- **字段口径只增键**:`pending.global`、逐 `code` 的 `count`、`bootAt`、投递点、`recent` 边界、`ctx.get` 的安全形态,见 [`docs/PRESENCE-CONTRACT-ADDENDUM.md`](./docs/PRESENCE-CONTRACT-ADDENDUM.md)(addendum 只补不改)。
+- **测试**:新增 `tests/docs-contract.test.mjs`(只读 markdown:三铁律 3/3 · 四不做 4/4 · 五码 5/5 **逐个**断言,缺一条即红);测试链 **60 → 61 段**。
+
 ## 1.7.3
 
 > 1.7.2 之后的**八个缺陷修复**小版本:**没有新功能**。前四条:两条属"静默失效"(能力与文案都与实情不符),

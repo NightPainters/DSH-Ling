@@ -7,7 +7,9 @@
 //   2) applyMode **不改全局** settings.mode.lastMode(否则飞书挡位会泄漏成桌面默认值);
 //   3) applyMode 优先用调用方带来的 keepModel,不读全局当前选择(否则会覆盖对方会话的模型);
 //   4) 非法入参 / 依赖抛错 一律**不抛**,以 {ok:false,reason} 返回 —— 对方缺席不该断流程;
-//   5) 对照:applyModeToSession 不带 opts 时**仍改** lastMode(GUI 语义未被改坏)。
+//   5) 对照:applyModeToSession 不带 opts 时**不改** lastMode(rc.4 默认 setDefault:false;
+//      写全局只剩 /mode/toggle 的 !sessionId 全局分支——defaultOnly:true 或无最近会话——
+//      它在端点内直接写 lastMode,不走 applyModeToSession 的 opts 路径)。
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -107,14 +109,14 @@ function boot({ running = [], services = null, throwOnProvide = false } = {}) {
   const r = await silent(() => b.api.applyMode('feishu-1', 'life', { keepModel: KEEP }));
   eq(r.ok, true, 'applyMode ok');
   eq(r.mode, 'life', '结果带 mode');
-  eq(r.reasoningEffort, 'low', 'life → 推理等级 low');
+  eq(r.reasoningEffort, 'high', 'life → 推理等级 high');
   eq(b.memory._modes.get('feishu-1'), 'life', '会话模式已写 life');
   eq(b.settings._raw().mode.lastMode, 'work', '★ 全局 lastMode 未被改动');
   eq(b.ctrl._calls.length, 1, 'selectModel 调了一次');
   eq(b.ctrl._calls[0].sessionId, 'feishu-1', 'sessionId 透传');
   eq(b.ctrl._calls[0].model, KEEP.model, '★ 用 keepModel 的模型,不用全局模型');
   eq(b.ctrl._calls[0].provider, KEEP.provider, 'provider 用 keepModel');
-  eq(b.ctrl._calls[0].reasoningEffort, 'low', 'selectModel 收到 life 的档位');
+  eq(b.ctrl._calls[0].reasoningEffort, 'high', 'selectModel 收到 life 的档位');
 }
 
 // ---------- 3b) 不带 keepModel → 退回全局当前选择(仍是合法行为,只是不该被跨插件用到) ----------
@@ -194,7 +196,7 @@ function boot({ running = [], services = null, throwOnProvide = false } = {}) {
   eq(b.api.currentMode('feishu-7'), 'life', '会话记录优先于 lastMode');
 }
 
-// ---------- 10) 对照:GUI 路径(applyModeToSession 不带 opts)行为未被改坏 ----------
+// ---------- 10) 对照:GUI 路径(applyModeToSession 不带 opts)不再改全局 lastMode ----------
 {
   const ctrl = fakeController();
   const ctx = fakeCtx({ services: svcBundle(ctrl) });
@@ -204,7 +206,7 @@ function boot({ running = [], services = null, throwOnProvide = false } = {}) {
   const r = await silent(() => applyModeToSession(ctx, gate, memory, settings, 'gui-1', 'life'));
   eq(r.ok, true, 'GUI 路径 ok');
   eq(memory._modes.get('gui-1'), 'life', 'GUI 路径写会话模式');
-  eq(settings._raw().mode.lastMode, 'life', '★ GUI 路径仍改 lastMode(D2 跟随未被改坏)');
+  eq(settings._raw().mode.lastMode, 'work', '★ GUI 路径不再改 lastMode(D2 解耦)');
   eq(ctrl._calls[0].model, GLOBAL.model, 'GUI 路径仍用全局当前模型原样带回');
 }
 

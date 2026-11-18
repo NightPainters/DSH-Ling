@@ -81,15 +81,15 @@ check(/比遗忘更危险/.test(MEMORY_BACKFILL_SPEC.description), 'backfill:描
 const registered = [];
 const fakeCtx = { tools: { register: (spec) => { registered.push(spec); return () => {}; } } };
 const r1 = registerLingTools(fakeCtx, { gate: { snapshotIds: () => [] }, memory: { kvSet: () => {} }, settings });
-check(r1.ok === true && registered.length === 11,
-  '注册成功:十一个工具(G1 加树工具,G2 加遗忘/回灌,1.6-P2 加直通原文,1.7 加图书馆检索/核对,B 档加深层库落条/作废)');
+check(r1.ok === true && registered.length === 13,
+  '注册成功:十三个工具(G1 加树工具,G2 加遗忘/回灌,1.6-P2 加直通原文,1.7 加图书馆检索/核对,B 档加深层库落条/作废,M5 加人格层否决权 ling_veto)');
 // ⚠️ 旧的八个名字**仍然逐字守住**(1.7 只新增两个,不许挤掉任何一个):
 const OLD_EIGHT = 'branch_edit,habit_propose,habit_resolve,memory_backfill,memory_forget,recall,rule_add,tree_read'.split(',');
 const regNames = registered.map((s) => s.name).sort();
 check(regNames.every((n) => n) && OLD_EIGHT.every((n) => regNames.includes(n)),
   '旧八个工具一个不少(1.7 之后仍全在)');
-check(regNames.join(',') === [...OLD_EIGHT, 'deep_item', 'library_check', 'library_search'].sort().join(','),
-  '注册的是这十一个名字(旧八 + library_check/library_search + deep_item)');
+check(regNames.join(',') === [...OLD_EIGHT, 'deep_item', 'library_check', 'library_search', 'ling_anchor', 'ling_veto'].sort().join(','),
+  '注册的是这十三个名字(旧八 + library_check/library_search + deep_item + ling_anchor + ling_veto)');
 check(registered.some((s) => s.name === TOOL_RECALL), 'recall(直通原文,1.6-P2)已注册');
 const r2 = registerLingTools({ get: () => null }, { gate: null, memory: null, settings });
 check(r2.ok === false && r2.reason === 'no-tools', '无 tools 服务 → 优雅降级(不抛错)');

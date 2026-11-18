@@ -981,6 +981,542 @@ if (hasModule('JSON')) {
     '★分发末尾的兜底 = **拒**(invalid_kind),不是落文本');
 }
 
+// ══ 15) M6b / 1.9 · 记忆**整包**导入的归属与字段级回执 ═══════════════════════════════════
+// 为什么落在这个文件:本任务的白名单只给了 `tests/library-import.test.mjs`(PLAN-1.9 §8.1 原本
+//   建议新建 `tests/import-bundle.test.mjs` —— 那要第 6 个文件,超出授权面)⇒ 按白名单落在这里。
+//   本节**自成一段**:自己的临时库、自己的素材,不碰上面 1–14 节的 LibraryStore(那边的 store 索引不变)。
+//
+// 钉住四件事(对应 PLAN-1.9 §7.2 的 I-1 / I-2 与 §7.5 的旧包兼容):
+//   ① 旧包(无 `identity_scope`)**不许静默当本机** —— 回执必须明说「归属未知,按本机处理」(固定串);
+//   ② 外来包 `overwrite=1` **不许**覆盖本机 `origin='user'` 行(跳过 + protectedSkips + warnings);
+//   ③ 回执**字段级**:`report.v3.perTable.<表>` 16 条,键集与本文件 `PT_FIELDS` 逐字相等;
+//   ④ 归属落库口径:外来包的空 `src` 补 `'import'`、`origin` 原样保真(不许把 user 洗成 import)。
+{
+  section('15 · 记忆整包导入:归属(identity_scope)/ 旧包不静默 / 字段级回执 / origin=user 护栏');
+  const { MemoryStore, detectImportIdentity, RELATION_TIERS } =
+    await imp('lib/host/memory.js');
+
+  // 逐表回执字段(与 memory.js 的 IMPORT_RECEIPT_FIELDS 逐字一致)
+  // `mode`/`missingSegment`/`reason` 是**公共字段**(骨架统一给,不写进逐表清单):
+  //   `mode` = always/opt-in/never;`missingSegment` = 包内缺段(never 表恒 false);
+  //   `reason` = 机器短码(不导表 `local-instrumentation`;旧包带 rawTurns 不认 `legacy-ignored`;其余 '')。
+  const PT_FIELDS = {
+    conv_overview: ['added', 'skipped', 'overwritten', 'protectedSkips'],
+    deep_item: ['added', 'skipped', 'overwritten', 'protectedSkips', 'supersededRestored', 'columnDiffs', 'diffColumns'],
+    kv: ['deepKeys', 'kvExtraKeys', 'skipped'],
+    feedback_queue: ['added', 'duplicate', 'invalid'],
+    persona_suggestions: ['added', 'duplicate', 'invalid'],
+    session_meta: ['added', 'skipped', 'overwritten'],
+    branch: ['added', 'skipped', 'overwritten'],
+    vein_link: ['added', 'skipped'],
+    conv_branch: ['added', 'skipped', 'overwritten'],
+    memory_conflict: ['added', 'skipped'],
+    branch_log: ['added', 'duplicate'],
+    vein_suggestions: ['added', 'duplicate'],
+    dsh_turns_raw: ['added', 'skipped', 'reason'],
+    tree_snapshot: ['added', 'duplicate', 'skipped', 'bytes'],
+    forgotten: ['added', 'skipped', 'applyBlocked'],
+    inject_log: ['exported', 'reason'],
+  };
+  const PT_NAMES = Object.keys(PT_FIELDS);
+  const sameSet = (a, b) => JSON.stringify([...a].map(String).sort()) === JSON.stringify([...b].map(String).sort());
+
+  const m6 = mkdtempSync(join(tmp, 'm6-'));
+  const src6 = new MemoryStore(join(m6, 'src.db'));   // 打包源库
+  const dst6 = new MemoryStore(join(m6, 'dst.db'));   // 目标库
+  const big6 = new MemoryStore(join(m6, 'big.db'));   // 外来包库
+
+  // 源库:一行概述 + 一条结论 + 一条原文 + 一条 kv(人格历史)
+  src6.upsertOverview({ conv_id: 's1', source: 'dsh', title: '源库会话', category: 'daily', overview_ok: true, summary: '摘要' });
+  src6.db.prepare(`INSERT INTO deep_item (id,kind,text,at,conv_id,seq_from,seq_to,src,origin,durability,created_at)
+    VALUES ('di:src-1','事实','源库结论','2026-09-07T00:00:00Z','s1',1,2,'dsh','auto','long','2026-09-07T00:00:00Z')`).run();
+  src6.appendRawTurn('s1', { seq: 1, role: 'user', ts: null, model: null, text: '原文一轮', source: 'dsh' });
+  src6.addFeedback({ session_id: 's1', message_id: 'm1', rating: 'negative', note: '别文言', created_at: '2026-09-07T00:00:00Z' });
+  src6.addPersonaSuggestion({ kind: 'aiName', value: '灵灵', note: '自称', evidence: { count: 2 } });
+  src6.kvSet('persona.hist.1000', JSON.stringify({ persona: { aiName: '灵' } }));
+  src6.kvSet('deep:s1', 'done:2026-09-07T01:00:00Z'); // deep 段(冻结:v2 语义,有概述才恢复)
+
+  // ── 15.0 `identity_scope` 在包里(导出侧最小 additive 字段;导出全覆盖在 tests/export-19.test.mjs)──
+  const mine = src6.exportBundle({ includeRaw: true });
+  check(!!mine.identity_scope && mine.identity_scope.schema === 1, '15.0 包内必须有 identity_scope{schema:1}');
+  check(/^[0-9a-f]{12}$/.test(String(mine.identity_scope.hostHash)), '15.0 identity_scope.hostHash = sha256 前 12 位 hex');
+  check(/^[0-9a-f]{16}$/.test(String(mine.identity_scope.packageId)), '15.0 identity_scope.packageId = sha256 前 16 位 hex');
+
+  // ── 15.1 本机包 ⇒ same-host(判定只比 hostHash)────────────────────────────────
+  const rMine = dst6.importBundle(mine);
+  check(rMine.identity.detected === 'same-host' && rMine.identity.hostMatch === true,
+    '15.1 本机包 detected=same-host,实际 ' + JSON.stringify(rMine.identity && rMine.identity.detected));
+  check(rMine.identity.message === '本机包(host 一致)', '15.1 本机包固定串:' + JSON.stringify(rMine.identity.message));
+  check(rMine.identity.applied === 'local', '15.1 本机包 applied=local');
+  check(rMine.identity.packageId === mine.identity_scope.packageId, '15.1 回执透出 packageId(同一份包可自证)');
+  check(rMine.added === 1 && rMine.v3.perTable.conv_overview.added === 1, '15.1 首次导入:added=1 且 perTable 同值');
+  check(rMine.queueAdded === 1 && rMine.v3.perTable.feedback_queue.added === 1, '15.1 首次导入:队列 1 条且 perTable 同值');
+  check(rMine.suggAdded === 1 && rMine.v3.perTable.persona_suggestions.added === 1, '15.1 首次导入:建议 1 条且 perTable 同值');
+  check(rMine.v3.perTable.kv.deepKeys === 1 && rMine.v3.perTable.kv.kvExtraKeys === 1, '15.1 kv 两段都真落了(deepKeys=1 / kvExtraKeys=1)');
+  check(rMine.v3.perTable.deep_item.added === 1, '15.1 deep_item 段真落了 1 条(1.9 新增段)');
+  check(rMine.v3.perTable.branch.skipped >= 1, '15.1 branch 段:目标库自带 trunk ⇒ 至少 skipped=1(不是缺陷)');
+
+  // ── 15.2 ★旧包(无 identity_scope)**不许静默当本机**(I-1 变异点)─────────────────
+  const legacy = {
+    format: 'dsh-ling-memory',
+    overviews: [{ conv_id: 'legacy-1', source: 'dsh', title: '旧包概述', overview_ok: true, summary: 's' }],
+    feedbackQueue: [{ session_id: 'legacy-1', message_id: 'm1', rating: 'negative' }],
+    suggestions: [{ kind: 'aiName', value: '旧名' }],
+    deep: [],
+  };
+  const rLegacy = dst6.importBundle(legacy);
+  check(rLegacy.errors === 0 && rLegacy.added === 1, '15.2 旧包仍能导(errors=0,added=1),实际 ' + JSON.stringify({ e: rLegacy.errors, a: rLegacy.added }));
+  check(rLegacy.identity && rLegacy.identity.detected === 'unknown',
+    '★15.2 旧包必须 detected=unknown(不许静默当本机),实际 ' + JSON.stringify(rLegacy.identity && rLegacy.identity.detected));
+  check(rLegacy.identity.message === '归属未知,按本机处理', '★15.2 旧包固定串逐字:「归属未知,按本机处理」,实际 ' + JSON.stringify(rLegacy.identity.message));
+  check(typeof rLegacy.identity.message === 'string' && rLegacy.identity.message.length > 0, '★15.2 message 必须存在且非空');
+  check(rLegacy.identity.applied === 'local' && rLegacy.identity.hostMatch === false,
+    '15.2 策略仍是"按本机处理",但要说出来(applied=local / hostMatch=false)');
+  check(rLegacy.identity.reason === 'missing', '15.2 机器短码 reason=missing');
+  // ★MF-5:归属必须**落库**(不只活在这次 HTTP 响应里)—— 否则 unknown 包的行级 origin 与真本机
+  //   导入同形,事后库里查不到任何"这批是未知/外来包带来的"痕迹,「按 identity_scope 标记回退」不可执行。
+  {
+    const stampRaw = dst6.kvGet('import.last');
+    let stamp = null;
+    try { stamp = JSON.parse(String(stampRaw)); } catch { stamp = null; }
+    check(typeof stampRaw === 'string' && stampRaw.length > 0, '★15.2b 导入后 kv 里有 import.last 归属痕迹,实际 ' + String(stampRaw));
+    check(!!stamp && stamp.detected === 'unknown' && stamp.applied === 'local' && stamp.reason === 'missing',
+      '★15.2b 旧包归属落库内容可读回(detected/applied/reason),实际 ' + JSON.stringify(stamp));
+    check(!!stamp && stamp.packageId === '', '★15.2b 旧包无 packageId ⇒ 只写 import.last(不编造)');
+    check(Array.isArray(rLegacy.identity.persistedKeys) && rLegacy.identity.persistedKeys.includes('import.last'),
+      '★15.2b 回执给出持久键名(persistedKeys),实际 ' + JSON.stringify(rLegacy.identity.persistedKeys));
+  }
+  // 五档 → message 一一对应(固定串表;`local-unknown` 只能真受限平台才出,离线不造假)
+  const idtCases = [
+    [null, 'unknown', '归属未知,按本机处理'],
+    [{ schema: 99, hostHash: '0123456789ab' }, 'unknown', '归属字段版本未知,按本机处理'],
+    [{ schema: 1, hostHash: 'not-hex' }, 'unknown', '归属字段不完整,按本机处理'],
+    [{ schema: 1, hostHash: '0123456789ab' }, 'foreign-host', '外来包(host 不一致),按外来记忆落库'],
+  ];
+  for (const [scope, wantDetected, wantMsg] of idtCases) {
+    const got = detectImportIdentity(scope ? { identity_scope: scope } : {});
+    check(got.detected === wantDetected && got.message === wantMsg,
+      '15.2 判定表 ' + JSON.stringify(scope) + ' ⇒ ' + wantDetected + '/' + wantMsg + ',实际 ' + JSON.stringify([got.detected, got.message]));
+    check(got.message !== '' && got.message !== undefined, '★15.2 每一档都必须有非空 message(不得静默)');
+  }
+
+  // ── 15.3 ★外来包 overwrite=1 **不许**覆盖 origin='user'(I-2 变异点)─────────────────
+  big6.upsertOverview({ conv_id: 'hand-1', source: 'dsh', title: '主人手写的标题', origin: 'user', overview_ok: true, summary: '手写' });
+  big6.db.prepare(`INSERT INTO deep_item (id,kind,text,at,conv_id,src,origin,durability,created_at)
+    VALUES ('di:hand-1','事实','主人手写的结论','2026-09-07T00:00:00Z','hand-1','dsh','user','durable','2026-09-07T00:00:00Z')`).run();
+  const foreignPkg = {
+    format: 'dsh-ling-memory',
+    identity_scope: { schema: 1, host: 'OTHER-PC', user: 'stranger', hostHash: 'deadbeefdead', packageId: 'cafebabecafebabe' },
+    overviews: [{ conv_id: 'hand-1', source: 'dsh', title: '外来包想改的标题', origin: 'user', overview_ok: true, summary: 'x' }],
+    deepItems: [
+      { id: 'di:hand-1', kind: '事实', text: '外来包想改的结论', at: '2026-09-07T00:00:00Z', conv_id: 'hand-1', src: '', origin: 'user', branch_id: '' },
+      { id: 'di:new-1', kind: '事实', text: '外来包新结论', at: '2026-09-07T00:00:00Z', conv_id: 'imp-x', src: '', origin: 'auto', branch_id: '' },
+    ],
+  };
+  const rEvil = big6.importBundle(foreignPkg, { overwrite: true });
+  check(big6.overviewById('dsh', 'hand-1').title === '主人手写的标题',
+    '★15.3 外来包不许改本机 origin=user 的标题,实际 ' + JSON.stringify(big6.overviewById('dsh', 'hand-1').title));
+  check(String(big6.deepItemById('di:hand-1').text) === '主人手写的结论',
+    '★15.3 外来包不许改本机 origin=user 的结论,实际 ' + JSON.stringify(big6.deepItemById('di:hand-1').text));
+  check(rEvil.v3.perTable.conv_overview.protectedSkips >= 1 && rEvil.v3.perTable.deep_item.protectedSkips >= 1,
+    '★15.3 回执必须点名保护次数(conv_overview/deep_item 各 ≥1),实际 '
+      + JSON.stringify([rEvil.v3.perTable.conv_overview.protectedSkips, rEvil.v3.perTable.deep_item.protectedSkips]));
+  check(rEvil.v3.warnings.includes('user-origin-protected'), '★15.3 warnings 必须含 user-origin-protected,实际 ' + JSON.stringify(rEvil.v3.warnings));
+  check(rEvil.identity.detected === 'foreign-host' && rEvil.identity.applied === 'foreign', '15.3 外来包 detected=foreign-host / applied=foreign');
+  check(rEvil.skipped === 1 && rEvil.overwritten === 0, '15.3 被保护的两行都算 skipped(不是 overwritten),实际 '
+    + JSON.stringify({ s: rEvil.skipped, o: rEvil.overwritten }));
+  // 新增的外来条目照落:origin 原样保真、空 src 补 'import'(PLAN §3.3)
+  const newRow = big6.deepItemById('di:new-1');
+  check(!!newRow && newRow.text === '外来包新结论', '15.3 外来包新增条目照落(护栏只挡覆盖,不挡新增)');
+  check(newRow && newRow.origin === 'auto', '15.3 外来条目 origin 原样保真(不洗成 import)');
+  check(newRow && newRow.src === 'import', '15.3 外来条目空 src 补 import(归属落点)');
+  // 本机包(同机)覆盖自己的手写行**不设此限** —— 否则护栏会变成"谁的备份都恢复不了"
+  const rHomeBack = big6.importBundle(big6.exportBundle(), { overwrite: true });
+  check(rHomeBack.overwritten >= 1 && !rHomeBack.v3.warnings.includes('user-origin-protected'),
+    '15.3 同机包恢复自己的手动行不被挡(overwritten=' + rHomeBack.overwritten + ')');
+  // ★MF-5:外来包按 packageId 单独留痕 ⇒ 可按包定向回退/清理
+  check(!!big6.kvGet('import.last.cafebabecafebabe'),
+    '★15.3b 外来包按 packageId 留痕(kv import.last.<packageId>),实际 keys=' + JSON.stringify(big6.db.prepare("SELECT key FROM kv WHERE key LIKE 'import.last%'").all().map((r) => r.key)));
+
+  // ── 15.4 ★回执字段级:16 张表各一条,键集 = mode/missingSegment + 逐表字段(不许只回总数)──
+  const rFull = dst6.importBundle(mine);
+  check(!!rFull.v3 && !!rFull.v3.perTable, '15.4 回执必须有 report.v3.perTable(字段级)');
+  check(Object.keys(rFull.v3.perTable).length === 16, '15.4 perTable 必须 16 条(实际 ' + Object.keys(rFull.v3.perTable).length + ')');
+  check(sameSet(Object.keys(rFull.v3.perTable), PT_NAMES), '15.4 perTable 表名清单与 spec 相等');
+  for (const name of PT_NAMES) {
+    const e = rFull.v3.perTable[name] || {};
+    const want = ['mode', 'missingSegment', ...PT_FIELDS[name]];
+    check(sameSet(Object.keys(e), want), '15.4 perTable.' + name + ' 键集必须是 ' + want.join('/') + ',实际 ' + Object.keys(e).join('/'));
+  }
+  check(rFull.v3.perTable.conv_overview.added === rFull.added, '15.4 perTable.conv_overview.added 与既有 added 同值(不是第二套计数)');
+  check(rFull.v3.perTable.feedback_queue.added === rFull.queueAdded, '15.4 perTable.feedback_queue.added 与既有 queueAdded 同值');
+  check(rFull.v3.perTable.persona_suggestions.added === rFull.suggAdded, '15.4 perTable.persona_suggestions.added 与既有 suggAdded 同值');
+  check(rFull.v3.perTable.inject_log.exported === 0 && rFull.v3.perTable.inject_log.reason === 'local-instrumentation',
+    '15.4 inject_log 永不导入,但必须在回执里登记(故意不导 ≠ 漏导)');
+  check(rFull.v3.readerVersion === 3 && rFull.v3.bundleVersion === 3, '15.4 回执报 readerVersion/bundleVersion');
+
+  // 旧包:11 个新段全 missingSegment=true 且全 0(不 error)
+  const newTables = ['deep_item', 'session_meta', 'branch', 'vein_link', 'conv_branch', 'memory_conflict',
+    'branch_log', 'vein_suggestions', 'dsh_turns_raw', 'tree_snapshot', 'forgotten'];
+  for (const name of newTables) {
+    check(rLegacy.v3.perTable[name].missingSegment === true, '15.4 旧包 perTable.' + name + '.missingSegment 必须 true');
+  }
+  check(rLegacy.v3.perTable.deep_item.added === 0 && rLegacy.v3.perTable.branch.added === 0, '15.4 旧包缺段 ⇒ 全 0(不 error)');
+
+  // ── 15.5 条件段 / 行为变化:rawTurns 从本版起真的落库;forgotten 默认只计数 ─────────────
+  // ⚠️ 行为变化(v3 之前导入侧对 rawTurns **零分支**,静默忽略):`rMine`(15.1 首次导入)已经证明了这一点。
+  check(rMine.v3.perTable.dsh_turns_raw.added === 1,
+    '15.5 ★行为变化:rawTurns 段从 1.9 起真的落库(首导 added=1,实际 ' + rMine.v3.perTable.dsh_turns_raw.added + ')');
+  check(!!dst6.db.prepare('SELECT 1 AS n FROM dsh_turns_raw WHERE session_id=? AND seq=?').get('s1', 1), '15.5 原文行确实进库了');
+  const rRaw2 = dst6.importBundle(mine);
+  check(rRaw2.v3.perTable.dsh_turns_raw.skipped >= 1, '15.5 同包重导 rawTurns 幂等(skipped ≥1)');
+  const withForgotten = { ...mine, forgotten: [{ source: 'dsh', conv_id: 's1', at: '2026-09-07T00:00:00Z', reason: '测试', archive_path: '', actor: 'user' }] };
+  const rFg = dst6.importBundle(withForgotten);
+  check(rFg.v3.perTable.forgotten.applyBlocked === 1 && rFg.v3.perTable.forgotten.added === 0,
+    '15.5 forgotten 默认**只计数不落库**(applyBlocked=1,added=0)');
+  check(rFg.v3.warnings.includes('forgotten-requires-applyForgotten'), '15.5 回执必须说明"需 applyForgotten=1"');
+  check(!dst6.db.prepare('SELECT 1 AS n FROM forgotten WHERE source=? AND conv_id=?').get('dsh', 's1'),
+    '15.5 默认没落 forgotten 行');
+  const rFg2 = dst6.importBundle(withForgotten, { applyForgotten: true });
+  check(rFg2.v3.perTable.forgotten.added === 1, '15.5 applyForgotten=1 才真的落库(added=1)');
+
+  // ── 15.7 ★MF-2:rawTurns **只对 v3 包**落库(旧包继续"忽略",但不静默)────────────────
+  //   `rawTurns` 是 v2 就存在的**旧**顶层键(v2 导入侧零分支)。无条件落库 = 同一份旧包在 v3 上
+  //   多写 N 行 = 改既有键语义。门 = `manifest.bundleVersion >= 3`。
+  {
+    const rawBefore = Number(dst6.db.prepare('SELECT COUNT(*) AS n FROM dsh_turns_raw').get().n);
+    const legacyRaw = {
+      ...legacy,
+      rawTurns: [
+        { session_id: 's1', seq: 99, role: 'user', ts: null, model: null, text: '旧包塞进来的原文', source: 'dsh' },
+        { session_id: 's1', seq: 100, role: 'assistant', ts: null, model: null, text: '旧包塞进来的第二行', source: 'dsh' },
+      ],
+    };
+    const rLegacyRaw = dst6.importBundle(legacyRaw);
+    const rawAfter = Number(dst6.db.prepare('SELECT COUNT(*) AS n FROM dsh_turns_raw').get().n);
+    check(rawAfter === rawBefore,
+      '★15.7 旧包(无 manifest)带 rawTurns ⇒ dsh_turns_raw 行数**不变**(' + rawBefore + '→' + rawAfter + ')');
+    check(rLegacyRaw.v3.perTable.dsh_turns_raw.added === 0 && rLegacyRaw.v3.perTable.dsh_turns_raw.skipped === 2,
+      '★15.7 旧包 rawTurns 不落库但**不静默**(added=0/skipped=2),实际 '
+        + JSON.stringify(rLegacyRaw.v3.perTable.dsh_turns_raw));
+    check(rLegacyRaw.v3.perTable.dsh_turns_raw.reason === 'legacy-ignored',
+      '★15.7 回执点名 reason=legacy-ignored,实际 ' + JSON.stringify(rLegacyRaw.v3.perTable.dsh_turns_raw.reason));
+    check(rLegacyRaw.v3.warnings.includes('raw-turns-legacy-ignored'),
+      '★15.7 warnings 带 raw-turns-legacy-ignored,实际 ' + JSON.stringify(rLegacyRaw.v3.warnings));
+    check(!dst6.db.prepare('SELECT 1 AS n FROM dsh_turns_raw WHERE seq IN (99,100)').get(),
+      '★15.7 那两行原文**确实没进库**');
+    // 反证:v3 包(带 manifest.bundleVersion:3)同样的段就落库 ⇒ 门不是"永远关"
+    const v3Raw = { format: 'dsh-ling-memory', manifest: { bundleVersion: 3 }, rawTurns: [{ session_id: 's1', seq: 101, role: 'user', ts: null, model: null, text: 'v3 包原文', source: 'dsh' }] };
+    const rV3Raw = dst6.importBundle(v3Raw);
+    check(rV3Raw.v3.perTable.dsh_turns_raw.added === 1 && rV3Raw.v3.perTable.dsh_turns_raw.reason === '',
+      '★15.7 正对照:v3 包 rawTurns 照落(added=1/reason 空),实际 ' + JSON.stringify(rV3Raw.v3.perTable.dsh_turns_raw));
+  }
+
+  // ── 15.8 ★MF-4:判重命中后**逐列比对**,差异不静默丢 ──────────────────────────────────
+  //   `deep_item` 判重键只 4 列(conv_id/seq_from/seq_to/text);命中后若直接 skip,
+  //   `superseded_by`/`origin`/`kind` 等 12 列的差异就永久消失(PLAN 自己写"superseded_by 丢了不可恢复")。
+  {
+    const baseRow = dst6.exportBundle().deepItems.find((r) => r.id === 'di:src-1');
+    check(!!baseRow, '15.8 取到已落库的 di:src-1(用真实导出行做基线)');
+    const tampered = { ...baseRow, superseded_by: 'di:src-2' }; // 只改一列
+    const rDup = dst6.importBundle({ format: 'dsh-ling-memory', manifest: { bundleVersion: 3 }, deepItems: [tampered] });
+    check(rDup.v3.perTable.deep_item.skipped === 1, '15.8 判重命中且 overwrite=false ⇒ skipped=1(不覆盖)');
+    check(rDup.v3.perTable.deep_item.columnDiffs === 1,
+      '★15.8 差异行必须计数(columnDiffs=1),实际 ' + JSON.stringify(rDup.v3.perTable.deep_item));
+    check(rDup.v3.perTable.deep_item.diffColumns === 'superseded_by',
+      '★15.8 回执必须**点名差异列**(superseded_by),实际 ' + JSON.stringify(rDup.v3.perTable.deep_item.diffColumns));
+    check(String(dst6.deepItemById('di:src-1').superseded_by) === '',
+      '15.8 未覆盖时库内原值不动(差异只被点名,不被悄悄改写)');
+    // 无差异的重导 ⇒ columnDiffs=0 且 diffColumns=''(别把"正常幂等"也报成差异)
+    const rSame = dst6.importBundle({ format: 'dsh-ling-memory', manifest: { bundleVersion: 3 }, deepItems: [baseRow] });
+    check(rSame.v3.perTable.deep_item.columnDiffs === 0 && rSame.v3.perTable.deep_item.diffColumns === '',
+      '15.8 完全相同的重导 ⇒ columnDiffs=0/diffColumns=\'\',实际 ' + JSON.stringify(rSame.v3.perTable.deep_item));
+  }
+  {
+    // tree_snapshot:只有 `note` 不同的两条快照**都要落库**(原指纹漏 note ⇒ 第二条被静默丢)
+    const snapBase = { at: '2026-09-07T00:00:00Z', name: '同刻快照', note: '备注 A', data: '{"t":1}', kind: 'manual' };
+    const rSnap = dst6.importBundle({
+      format: 'dsh-ling-memory', manifest: { bundleVersion: 3 },
+      snapshots: [snapBase, { ...snapBase, note: '备注 B' }],
+    });
+    const notes = dst6.db.prepare('SELECT note FROM tree_snapshot WHERE at=? AND name=? ORDER BY note').all('2026-09-07T00:00:00Z', '同刻快照').map((r) => String(r.note));
+    check(rSnap.v3.perTable.tree_snapshot.added === 2, '★15.8 只差 note 的两条快照都落库(added=2),实际 ' + JSON.stringify(rSnap.v3.perTable.tree_snapshot));
+    check(notes.join(',') === '备注 A,备注 B', '★15.8 note 两条都在库里(不再被指纹吞掉),实际 ' + JSON.stringify(notes));
+  }
+  {
+    // vein_suggestions:判重键升级成导出 8 列全等 ⇒ `model` 不同的两条都落库(原键只 3 列)
+    const vsBase = { at: '2026-09-07T00:00:00Z', vein_id: 'trunk', text: '同文本建议', sources: '["s1"]', model: 'm1', status: 'new', note: '', resolved_at: null };
+    const rVs = dst6.importBundle({
+      format: 'dsh-ling-memory', manifest: { bundleVersion: 3 },
+      veinSuggestions: [vsBase, { ...vsBase, model: 'm2' }],
+    });
+    const models = dst6.db.prepare("SELECT model FROM vein_suggestions WHERE text='同文本建议' ORDER BY model").all().map((r) => String(r.model));
+    check(rVs.v3.perTable.vein_suggestions.added === 2, '★15.8 model 不同的两条建议都落库(added=2),实际 ' + JSON.stringify(rVs.v3.perTable.vein_suggestions));
+    check(models.join(',') === 'm1,m2', '★15.8 两条都在库里(不再按 3 列键吞字段),实际 ' + JSON.stringify(models));
+  }
+
+  // ── 15.6 异常路径也不许少"这包是谁的"(只增不减)──────────────────────────────
+  const rBad = dst6.importBundle({ format: 'not-dsh-ling' });
+  check(rBad.errors === 1, '15.6 未知 format ⇒ errors=1(既有语义不变)');
+  check(!!rBad.identity && rBad.identity.detected === 'unknown' && rBad.identity.message === '归属未知,按本机处理',
+    '15.6 坏包回执同样带 identity + 固定串');
+  check(rBad.v3.warnings.includes('bad-format'), '15.6 坏包 warnings 含 bad-format');
+
+  for (const db of [src6, dst6, big6]) { try { db.close(); } catch { /* noop */ } }
+}
+
+// ══ 16) M8 残余回归(R7 / R8 / R10 / R11 / R12)═══════════════════════════════════════════
+// 为什么单开一节:15.x 钉的是"字段存在 + 键集 + 差异点名",这五条钉的是**值与顺序**:
+//   R7  `supersededRestored` 的**值**(15.x 只在键集里出现,没有任何值断言 —— 写进回执却没人验);
+//   R8  四元组命中路径的**幻影 `id` 差异列**(手工包没 id,不能因此报"id 有差异");
+//   R10 `packageId` 拼 kv 键前的**白名单**(包是不可信输入:任意长/任意字符都变键);
+//   R11 归属戳必须在**落库之后**写(全失败不许留下"成功"形状,回滚不许让戳前进);
+//   R12 `overwrite=true` 的**差异路径**(15.8 只测了 overwrite=false 的差异)。
+// 每条都有可回退变异(memory.js 里对应的一处改动),**回退即红** —— 见 _crew/reports/m8-fixcode/impl.md。
+{
+  section('16 · M8 残余:R7 supersededRestored 值 / R8 四元组幻影 id / R10 packageId 白名单 / R11 归属戳时序 / R12 overwrite 差异');
+  const { MemoryStore: MS16, validatePackageId } = await imp('lib/host/memory.js');
+  const m16 = mkdtempSync(join(tmp, 'm16-'));
+  const s16 = new MS16(join(m16, 's16.db'));
+  const insDi16 = s16.db.prepare(
+    `INSERT INTO deep_item (id,kind,text,at,conv_id,seq_from,seq_to,src,origin,durability,superseded_by,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+  );
+  insDi16.run('di:r7-keep', '事实', '已带取代留痕的结论', '2026-09-07T00:00:00Z', 'r7', 1, 2, 'dsh', 'auto', 'long', 'di:r7-old', '2026-09-07T00:00:00Z');
+  insDi16.run('di:r7-empty', '事实', '未被取代的结论', '2026-09-07T00:00:01Z', 'r7', 3, 4, 'dsh', 'auto', 'long', '', '2026-09-07T00:00:01Z');
+  insDi16.run('di:r8-quad', '事实', '四元组命中的结论', '2026-09-07T00:00:02Z', 'r8', 5, 6, 'dsh', 'auto', 'long', '', '2026-09-07T00:00:02Z');
+  insDi16.run('di:r12-diff', '事实', '要被覆盖比对的行', '2026-09-07T00:00:03Z', 'r12', 7, 8, 'dsh', 'auto', 'long', '', '2026-09-07T00:00:03Z');
+
+  // 导出行的列集 = 16 列(含 `id`)—— R8 只许在**四元组比较**里剥 id,导出侧不许少列。
+  const DEEP16 = ['id', 'kind', 'text', 'at', 'conv_id', 'seq_from', 'seq_to', 'src', 'hit_count',
+    'pinned', 'durability', 'superseded_by', 'origin', 'branch_id', 'created_at', 'updated_at'];
+  const diRow = (id) => s16.exportBundle().deepItems.find((r) => r.id === id);
+  const pkg16 = (rows, extra = {}) => ({ format: 'dsh-ling-memory', manifest: { bundleVersion: 3 }, deepItems: rows, ...extra });
+  const sameSet16 = (a, b) => JSON.stringify([...a].map(String).sort()) === JSON.stringify([...b].map(String).sort());
+
+  // ── R7:`supersededRestored` 的**值**(覆盖分支 / 新增分支 / 空 superseded_by / 未覆盖)──
+  {
+    const keep = diRow('di:r7-keep');
+    check(!!keep && keep.superseded_by === 'di:r7-old', '★16-R7.0 基线行 di:r7-keep 的 superseded_by 非空,实际 ' + JSON.stringify(keep && keep.superseded_by));
+    check(!!keep && Object.keys(keep).length === 16 && sameSet16(Object.keys(keep), DEEP16),
+      '★16-R8.0 导出 deepItems 行仍是 16 列且含 id(R8 不许削导出列集),实际 ' + JSON.stringify(keep && Object.keys(keep)));
+
+    // ① 命中判重 + `overwrite=false` ⇒ 没落库 ⇒ supersededRestored 必须 0(不许把"跳过"报成"恢复")
+    const rSkip = s16.importBundle(pkg16([keep]));
+    check(rSkip.v3.perTable.deep_item.skipped === 1, '★16-R7.1 命中且未覆盖 ⇒ skipped=1');
+    check(rSkip.v3.perTable.deep_item.supersededRestored === 0,
+      '★16-R7.1 未落库 ⇒ supersededRestored 必须 0,实际 ' + JSON.stringify(rSkip.v3.perTable.deep_item.supersededRestored));
+
+    // ② 同一行 `overwrite=true` ⇒ 真的覆盖落库 ⇒ supersededRestored 必须 1(覆盖分支自增点)
+    const rOv = s16.importBundle(pkg16([keep]), { overwrite: true });
+    check(rOv.v3.perTable.deep_item.overwritten === 1 && rOv.v3.perTable.deep_item.supersededRestored === 1,
+      '★16-R7.2 overwrite=true 覆盖且 superseded_by 非空 ⇒ supersededRestored=1,实际 '
+        + JSON.stringify(rOv.v3.perTable.deep_item));
+    check(String(s16.deepItemById('di:r7-keep').superseded_by) === 'di:r7-old', '★16-R7.2 库内留痕仍在');
+
+    // ③ `superseded_by=''` 的行覆盖 ⇒ 不计(0)
+    const rEmpty = s16.importBundle(pkg16([diRow('di:r7-empty')]), { overwrite: true });
+    check(rEmpty.v3.perTable.deep_item.overwritten === 1 && rEmpty.v3.perTable.deep_item.supersededRestored === 0,
+      '★16-R7.3 superseded_by=\'\' ⇒ 不计入 supersededRestored(0),实际 ' + JSON.stringify(rEmpty.v3.perTable.deep_item));
+
+    // ④ 新增一条 superseded_by 非空、无命中的行 ⇒ 走**新增分支**也必须 1
+    const newSup = {
+      id: 'di:r7-new', kind: '事实', text: '新增的已取代结论', at: '2026-09-07T00:00:04Z',
+      conv_id: 'r7', seq_from: 9, seq_to: 10, src: 'dsh', origin: 'auto', durability: 'long',
+      superseded_by: 'di:r7-keep', branch_id: '', created_at: '2026-09-07T00:00:04Z', updated_at: '',
+      hit_count: 0, pinned: 0,
+    };
+    const rNew = s16.importBundle(pkg16([newSup]));
+    check(rNew.v3.perTable.deep_item.added === 1 && rNew.v3.perTable.deep_item.supersededRestored === 1,
+      '★16-R7.4 新增且 superseded_by 非空 ⇒ supersededRestored=1(新增分支自增点),实际 '
+        + JSON.stringify(rNew.v3.perTable.deep_item));
+    check(String(s16.deepItemById('di:r7-new').superseded_by) === 'di:r7-keep', '★16-R7.4 新增行真的落库并带留痕');
+  }
+
+  // ── R8:四元组命中路径的**幻影 `id` 差异列** ─────────────────────────────────────────────
+  // 手工包没有 `id`(幂等键回退 conv_id+seq_from+seq_to+text),其余 15 列与库内行**逐列相同**
+  // ⇒ 正确回执是 `columnDiffs=0 / diffColumns=''`;照 16 列比会把 `id` 报成差异(幻影)。
+  {
+    const base8 = diRow('di:r8-quad');
+    const { id: droppedId, ...noId8 } = base8;
+    check(droppedId === 'di:r8-quad' && !Object.hasOwn(noId8, 'id'), '★16-R8.1 构造的手工包行确实没有 id 列');
+    const rQuad = s16.importBundle(pkg16([noId8]));
+    check(rQuad.v3.perTable.deep_item.skipped === 1, '★16-R8.2 四元组命中 ⇒ skipped=1(幂等键回退生效)');
+    check(rQuad.v3.perTable.deep_item.columnDiffs === 0,
+      '★16-R8.2 仅"包内没 id"不算差异 ⇒ columnDiffs=0,实际 ' + JSON.stringify(rQuad.v3.perTable.deep_item));
+    check(rQuad.v3.perTable.deep_item.diffColumns === '',
+      '★16-R8.2 回执不许点名幻影差异列 id,实际 ' + JSON.stringify(rQuad.v3.perTable.deep_item.diffColumns));
+    // 反证(别把"永远不报差异"当成修好了):同一路径下**真有**一列不同 ⇒ 仍要点名
+    const rQuadReal = s16.importBundle(pkg16([{ ...noId8, superseded_by: 'di:r8-y' }]));
+    check(rQuadReal.v3.perTable.deep_item.diffColumns === 'superseded_by'
+      && rQuadReal.v3.perTable.deep_item.columnDiffs === 1,
+      '★16-R8.3 四元组路径下真差异仍要点名(superseded_by/1),实际 ' + JSON.stringify(rQuadReal.v3.perTable.deep_item));
+  }
+
+  // ── R10:`packageId` 拼 kv 键前的白名单(安全字符集 + 长度上限)────────────────────────────
+  {
+    // ① 校验函数本身的口径(导出侧 16 位 hex 是它的**子集** ⇒ 本机包一律通过)
+    check(JSON.stringify(validatePackageId('cafebabecafebabe')) === JSON.stringify({ ok: true, packageId: 'cafebabecafebabe', reason: '' }),
+      '★16-R10.0 合法 packageId(16 位 hex)⇒ {ok:true},实际 ' + JSON.stringify(validatePackageId('cafebabecafebabe')));
+    // 边界**正例**(MF-7 / MF-4③):上限是 80 ⇒ 80 个字符必须收;把 `{1,80}` 改成 `{1,79}` 这两条必红。
+    //   大写 A 那条同时钉住"字符集放宽到 [A-Za-z0-9._-] 是**有意**的"(不是只剩 hex 的旧口径)。
+    for (const edge of ['a'.repeat(80), 'A'.repeat(80)]) {
+      const vEdge = validatePackageId(edge);
+      check(vEdge.ok === true && vEdge.packageId === edge && vEdge.reason === '',
+        '★16-R10.5 边界正例:' + edge.length + ' 个 "' + edge[0] + '"(长度上限 80 恰在界内)⇒ {ok:true},实际 ' + JSON.stringify(vEdge));
+    }
+    // 反证:81 也在 badIds 里(见下),80 收 / 81 拒 ⇒ 边界被钉在 80,不是"随便收"
+    check(validatePackageId('a'.repeat(81)).ok === false,
+      '★16-R10.5 边界反证:81 个 a ⇒ {ok:false}(80 收/81 拒)');
+    const badIds = ['', '../x', 'a'.repeat(100000), 'has space', 'a'.repeat(81), 'di/../x', '<script>'];
+    for (const bad of badIds) {
+      const v = validatePackageId(bad);
+      check(v.ok === false && v.reason === 'bad-package-id' && v.packageId === '',
+        '★16-R10.1 ' + JSON.stringify(String(bad).slice(0, 12)) + '(len=' + String(bad).length + ') ⇒ {ok:false,reason:bad-package-id},实际 ' + JSON.stringify(v));
+    }
+    const kvLastKeys = () => s16.db.prepare("SELECT key FROM kv WHERE key LIKE 'import.last%' ORDER BY key").all().map((r) => String(r.key));
+    const beforeKeys = kvLastKeys();
+    // ② 非法 packageId 走真导入:只写 `import.last`,不新增按包键;回执说清原因 + 告警码
+    for (let i = 0; i < badIds.length; i += 1) {
+      const bad = badIds[i];
+      const rep = s16.importBundle({
+        format: 'dsh-ling-memory',
+        identity_scope: { schema: 1, host: 'OTHER-PC', user: 'stranger', hostHash: 'deadbeefdead', packageId: bad },
+        overviews: [{ conv_id: 'r10-' + i, source: 'dsh', title: '非法 packageId 包 ' + i, overview_ok: true, summary: 'x' }],
+      });
+      const label = '★16-R10.2 非法 packageId(len=' + String(bad).length + ')';
+      check(rep.errors === 0, label + ' 导入不许因 packageId 非法而失败,实际 errors=' + rep.errors);
+      // 空串 = "本来就没有 packageId"的旧包形状(包里显式写 '' 与缺键在判定上不可分)
+      //   ⇒ 回执 `packageIdValid:null`、不告警;但**仍然**不写按包键。非空非法值必须 false + 告警。
+      if (bad === '') {
+        check(rep.identity.packageIdValid === null, label + ' 空串按"旧包无 packageId"处理 ⇒ packageIdValid=null,实际 ' + JSON.stringify(rep.identity.packageIdValid));
+        check(!rep.v3.warnings.includes('identity-packageid-invalid'), label + ' 空串不告警(旧包不是攻击面),实际 ' + JSON.stringify(rep.v3.warnings));
+      } else {
+        check(rep.identity.packageIdValid === false, label + ' 回执 packageIdValid=false,实际 ' + JSON.stringify(rep.identity.packageIdValid));
+        check(rep.identity.packageIdReason === 'bad-package-id', label + ' 回执给出 reason=bad-package-id,实际 ' + JSON.stringify(rep.identity.packageIdReason));
+        check(rep.v3.warnings.includes('identity-packageid-invalid'), label + ' warnings 含 identity-packageid-invalid,实际 ' + JSON.stringify(rep.v3.warnings));
+      }
+      check(rep.identity.persistedKeys.length === 1 && rep.identity.persistedKeys[0] === 'import.last',
+        label + ' 只写 import.last(不写按包键),实际 ' + JSON.stringify(rep.identity.persistedKeys));
+      check(JSON.stringify(kvLastKeys()) === JSON.stringify(beforeKeys),
+        label + ' kv 的 import.last* 键集不增,实际 ' + JSON.stringify(kvLastKeys()));
+      let stamp = null;
+      try { stamp = JSON.parse(String(s16.kvGet('import.last'))); } catch { stamp = null; }
+      check(!!stamp && stamp.packageId === '', label + ' 落库戳里 packageId 必须是空串(不落非法值),实际 ' + JSON.stringify(stamp && stamp.packageId));
+    }
+    // 正对照:合法 packageId ⇒ 按包键照写(否则上面的"键集不增"可能只是"永远不写")
+    const rOkPkg = s16.importBundle({
+      format: 'dsh-ling-memory',
+      identity_scope: { schema: 1, host: 'OTHER-PC', user: 'stranger', hostHash: 'deadbeefdead', packageId: '00112233aabbccdd' },
+      overviews: [{ conv_id: 'r10-ok', source: 'dsh', title: '合法 packageId 包', overview_ok: true, summary: 'x' }],
+    });
+    check(rOkPkg.identity.packageIdValid === true && rOkPkg.identity.persistedKeys.includes('import.last.00112233aabbccdd'),
+      '★16-R10.3 合法 packageId ⇒ 按包留痕照写,实际 ' + JSON.stringify(rOkPkg.identity.persistedKeys));
+    // ③ 归属 scope 只落白名单字段(长度上限;对方塞进来的字段不落库)
+    const stampScope = JSON.parse(String(s16.kvGet('import.last'))).scope || {};
+    check(sameSet16(Object.keys(stampScope), ['schema', 'host', 'user', 'exportedAt', 'hostHash', 'packageId']),
+      '★16-R10.4 落库戳的 scope 只留 6 个白名单字段,实际 ' + JSON.stringify(Object.keys(stampScope)));
+    const rScope = s16.importBundle({
+      format: 'dsh-ling-memory',
+      identity_scope: {
+        schema: 1, host: 'H'.repeat(500), user: 'U'.repeat(500), hostHash: 'deadbeefdead',
+        packageId: 'a1b2c3d4e5f60718', evil: 'x'.repeat(1000), nested: { a: 1 },
+      },
+      overviews: [{ conv_id: 'r10-scope', source: 'dsh', title: 'scope 白名单包', overview_ok: true, summary: 'x' }],
+    });
+    const scope2 = JSON.parse(String(s16.kvGet('import.last'))).scope || {};
+    check(rScope.errors === 0 && !Object.hasOwn(scope2, 'evil') && !Object.hasOwn(scope2, 'nested')
+      && String(scope2.host).length === 128 && String(scope2.user).length === 128,
+      '★16-R10.4 scope 非白名单字段丢弃 + 超长截断(128),实际 ' + JSON.stringify({ host: String(scope2.host).length, keys: Object.keys(scope2) }));
+  }
+
+  // ── R11:归属戳必须在**落库之后**写(全失败不许成功形状;回滚不许戳前进)────────────────
+  {
+    const r11 = new MS16(join(m16, 'r11.db'));
+    const readStamp = () => {
+      const raw = r11.kvGet('import.last');
+      if (raw === null || raw === undefined) return { raw: null, stamp: null };
+      try { return { raw: String(raw), stamp: JSON.parse(String(raw)) }; } catch { return { raw: String(raw), stamp: null }; }
+    };
+    // ① 正常包:戳仍可读回(detected/applied/reason/packageId)且带本轮真实结果
+    const rOk = r11.importBundle({
+      format: 'dsh-ling-memory',
+      identity_scope: { schema: 1, host: 'OTHER-PC', user: 'stranger', hostHash: 'deadbeefdead', packageId: 'a1b2c3d4e5f60718' },
+      overviews: [{ conv_id: 'r11-ok', source: 'dsh', title: '正常包', overview_ok: true, summary: 'x' }],
+    });
+    const okStamp = readStamp().stamp || {};
+    check(rOk.errors === 0 && rOk.added === 1, '16-R11.0 正常包 errors=0/added=1');
+    check(okStamp.detected === 'foreign-host' && okStamp.applied === 'foreign' && okStamp.reason === 'differ'
+      && okStamp.packageId === 'a1b2c3d4e5f60718',
+      '★16-R11.1 正常包:戳仍可读回 detected/applied/reason/packageId,实际 ' + JSON.stringify(okStamp));
+    check(okStamp.ok === true && okStamp.errors === 0 && Number(okStamp.rows) >= 1,
+      '★16-R11.1 正常包:戳带本轮真实结果 ok=true/errors=0/rows≥1,实际 ' + JSON.stringify({ ok: okStamp.ok, errors: okStamp.errors, rows: okStamp.rows }));
+
+    // ② 全部行都失败(单行错误只计数不回滚)⇒ 戳可以是"失败形状",绝不能是成功形状
+    const allFail = r11.importBundle({
+      format: 'dsh-ling-memory',
+      manifest: { bundleVersion: 3 },
+      deepItems: [{ id: '', text: '必失败的行', conv_id: 'r11-bad', seq_from: { valueOf() { throw new Error('boom-seq'); } }, seq_to: 1 }],
+    });
+    const failStamp = readStamp().stamp || {};
+    check(allFail.errors === 1, '★16-R11.2 坏行 ⇒ errors=1(单行错误只计数,既有语义不变),实际 ' + allFail.errors);
+    check(failStamp.errors === 1 && failStamp.ok === false && failStamp.rows === 0 && failStamp.added === 0,
+      '★16-R11.2 全失败 ⇒ 戳必须写失败形状(errors=1/ok=false/rows=0/added=0),实际 '
+        + JSON.stringify({ errors: failStamp.errors, ok: failStamp.ok, rows: failStamp.rows, added: failStamp.added }));
+
+    // ③ 异常逃出 ⇒ 整包回滚 ⇒ 戳**不前进**(逐字等于上一次的戳)+ 目标表没落库
+    const before = readStamp();
+    const rollbackPkg = {
+      format: 'dsh-ling-memory',
+      manifest: { bundleVersion: 3 },
+      identity_scope: { schema: 1, host: 'OTHER-PC', user: 'stranger', hostHash: 'deadbeefdead', packageId: 'ffeeddccbbaa9988' },
+      overviews: [{ conv_id: 'r11-roll', source: 'dsh', title: '回滚包', overview_ok: true, summary: 'x' }],
+    };
+    Object.defineProperty(rollbackPkg, 'kvExtra', { enumerable: true, get() { throw new Error('boom-kvExtra'); } });
+    const rRb = r11.importBundle(rollbackPkg);
+    const after = readStamp();
+    check(rRb.errors === 1 && rRb.v3.warnings.includes('import-rolled-back'),
+      '16-R11.3 异常逃出 ⇒ 回执 errors=1 + import-rolled-back,实际 ' + JSON.stringify([rRb.errors, rRb.v3.warnings]));
+    check(before.raw !== null && after.raw === before.raw,
+      '★16-R11.3 整包回滚 ⇒ import.last 一个字节都不前进,实际 ' + JSON.stringify({ before: before.raw, after: after.raw }));
+    check(r11.kvGet('import.last.ffeeddccbbaa9988') === undefined,
+      '★16-R11.3 回滚包不许留下按包键 import.last.ffeeddccbbaa9988');
+    check(r11.overviewById('dsh', 'r11-roll') === undefined, '★16-R11.3 回滚包的行也确实没落库');
+    r11.close();
+  }
+
+  // ── R12:`overwrite=true` 的差异路径(15.8 只测了 overwrite=false)─────────────────────────
+  {
+    const base12 = diRow('di:r12-diff');
+    check(!!base12 && base12.superseded_by === '', '16-R12.0 基线行 di:r12-diff 的 superseded_by 为空');
+    const tampered12 = { ...base12, superseded_by: 'di:r12-x' };
+    const rDiff = s16.importBundle(pkg16([tampered12]), { overwrite: true });
+    check(rDiff.v3.perTable.deep_item.overwritten === 1 && rDiff.v3.perTable.deep_item.skipped === 0,
+      '★16-R12.1 overwrite=true 差异行 ⇒ overwritten=1/skipped=0,实际 ' + JSON.stringify(rDiff.v3.perTable.deep_item));
+    check(rDiff.v3.perTable.deep_item.columnDiffs === 1 && rDiff.v3.perTable.deep_item.diffColumns === 'superseded_by',
+      '★16-R12.1 overwrite=true 仍要点名差异列,实际 ' + JSON.stringify({ c: rDiff.v3.perTable.deep_item.columnDiffs, d: rDiff.v3.perTable.deep_item.diffColumns }));
+    check(rDiff.v3.perTable.deep_item.supersededRestored === 1,
+      '★16-R12.1 覆盖分支落库的 superseded_by 非空 ⇒ supersededRestored=1,实际 ' + rDiff.v3.perTable.deep_item.supersededRestored);
+    check(String(s16.deepItemById('di:r12-diff').superseded_by) === 'di:r12-x',
+      '★16-R12.2 库内 superseded_by 真的被覆盖成目标值,实际 ' + JSON.stringify(String(s16.deepItemById('di:r12-diff').superseded_by)));
+    // 无差异的 overwrite=true 重导 ⇒ 不报差异、不重复计 supersededRestored
+    // ⚠️ 必须用**覆盖后重新导出**的行:覆盖会刷新 `updated_at`,拿旧的 base 行会真的差一列。
+    const same12 = { ...diRow('di:r12-diff') };
+    check(same12.superseded_by === 'di:r12-x', '16-R12.3 覆盖后重导基线取自库内新值');
+    const rSame12 = s16.importBundle(pkg16([same12]), { overwrite: true });
+    check(rSame12.v3.perTable.deep_item.overwritten === 1 && rSame12.v3.perTable.deep_item.columnDiffs === 0
+      && rSame12.v3.perTable.deep_item.diffColumns === '' && rSame12.v3.perTable.deep_item.supersededRestored === 1,
+      '★16-R12.3 无差异的 overwrite=true 重导 ⇒ columnDiffs=0/diffColumns=\'\'(superseded_by 仍非空 ⇒ supersededRestored=1),实际 '
+        + JSON.stringify(rSame12.v3.perTable.deep_item));
+    // 反证:superseded_by='' 的新行覆盖 ⇒ supersededRestored=0(否则 R12.1 的 1 可能只是"永远 1")
+    const rEmpty12 = s16.importBundle(pkg16([{ ...same12, superseded_by: '' }]), { overwrite: true });
+    check(rEmpty12.v3.perTable.deep_item.overwritten === 1 && rEmpty12.v3.perTable.deep_item.supersededRestored === 0,
+      '★16-R12.4 覆盖成 superseded_by=\'\' ⇒ supersededRestored=0,实际 ' + JSON.stringify(rEmpty12.v3.perTable.deep_item));
+  }
+
+  s16.close();
+}
+
 // ── 收尾 ──────────────────────────────────────────────────────────────────────────────
 try { store.close(); } catch { /* 已经关了就算了 */ }
 if (realHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = realHome;

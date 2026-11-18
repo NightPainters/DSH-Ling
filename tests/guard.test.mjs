@@ -298,13 +298,50 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
   check(JSON.stringify(verifySurgeryChain(emptyFile)) === JSON.stringify({ ok: true, count: 0, brokenAt: null, reason: null }),
     '空文件 = 空链(还没发生过手术)⇒ ok,不误报');
 
-  // ── 8.6 rawUnlock:只从原文里抽承诺句(不整包 parse 4 MiB bundle)────────────────
+  // ── 8.6 rawUnlock:只从原文的**顶层协议字段**抽承诺句(不整包 parse 4 MiB bundle)──────
+  //   缺陷(蓝队 B1-3 / 红2 R2-2):修前是**全文正则**取第一个 `"unlock"`/`"key"` ⇒
+  //   导出包的 `deep` 段天然是 `{key,value}`(memory.js:3288)⇒ 包内任意 `key` 会抢答:
+  //   正确原句被无视(回执说"原句不匹配",理由说谎),而承诺句只藏在包内时**门反而放行**,
+  //   于是 `importBundle` 在人格检查之前执行 ⇒ "回执说拒了,记忆却已经换了"。
+  const PHRASE_829 = '这是我在定型时亲手写下的承诺句。';
   check(rawUnlock('{"bundle":{"a":1},"unlock":"这是原句"}') === '这是原句', 'rawUnlock:顶层 unlock 抽得出');
-  check(rawUnlock('{"bundle":{"unlock":"嵌入的假句"},"unlock":"真的"}') === '嵌入的假句',
-    'rawUnlock:抽的是**第一个** "unlock"(bundle 在 unlock 之前 ⇒ 命中嵌入键,故调用点须保证 unlock 在前/唯一的形状)');
+  check(rawUnlock('{"bundle":{"unlock":"嵌入的假句"},"unlock":"真的"}') === '真的',
+    '★rawUnlock:只认**顶层** unlock(修前取全文第一个 ⇒ 包内嵌的那个抢答)');
+  check(rawUnlock('{"bundle":{"deep":[{"key":"deep:s-1","value":"一条深层记忆"}]},"unlock":"这是原句"}') === '这是原句',
+    '★rawUnlock:包内 `key`(导出包天然带)不许抢答 ⇒ 正确原句仍被认出');
+  check(rawUnlock('{"key":"deep:s-1"}') === '', '★rawUnlock:只有包内 key、没有顶层 unlock ⇒ 空串');
+  check(rawUnlock('{"bundle":{"deep":[{"key":"' + PHRASE_829 + '"}]}}') === '',
+    '★rawUnlock:承诺句只出现在包内 ⇒ 不算(修前会取到它 ⇒ 门放行,记忆先被换)');
   check(rawUnlock('{"bundle":{}}') === '' && rawUnlock('') === '' && rawUnlock('not json') === '',
     'rawUnlock:取不到 ⇒ 空串(空串永远不等于任何已存的承诺句 ⇒ 只会更严,不会误放行)');
   check(rawUnlock('{"unlock":"a\\"b"}') === 'a"b', 'rawUnlock:按 JSON 规则反转义');
+  check(rawUnlock('{"unlock":"真的","unlock":"第二个"}') === '第二个',
+    'rawUnlock:顶层同名键 ⇒ 与 JSON.parse 同口径(**最后**一个,不是全文第一个)');
+  check(rawUnlock('{"Unlock":"大小写不同"}') === '' && rawUnlock('{"unlock":123}') === '',
+    'rawUnlock:键不是逐字 `unlock` / 值不是字符串 ⇒ 空串(fail-closed,不退回正则)');
+
+  // 8.6b 门本身(不是只验 helper):同一份"真实导出包形状"的原文 —— 包内容改不了结论
+  {
+    const sealedGate = { get: () => ({ persona: { sealed: true, sealPhrase: PHRASE_829 }, guard: { enforce: true } }) };
+    const localHdr = () => ({ host: '127.0.0.1:3080', 'user-agent': UA_LOCAL, 'x-dsh-ling-surgery': readSurgeryTicket() });
+    const realShaped = JSON.stringify({
+      bundle: { deep: [{ key: 'deep:s-1', value: '这是本机的一条深层记忆' }] },
+      persona: true,
+      unlock: PHRASE_829,
+    });
+    const gOk = requireSurgery(localHdr(), realShaped, { settings: sealedGate });
+    check(gOk.ok === true && gOk.gated === true,
+      '★门:真实导出包(key 段在 unlock 之前)+ 顶层正确原句 ⇒ 放行(修前 surgery-phrase,实测 '
+        + JSON.stringify(gOk.reason || gOk.ok) + ')');
+    const planted = JSON.stringify({ bundle: { deep: [{ key: PHRASE_829, value: '包内藏句' }] }, persona: true });
+    const gPlanted = requireSurgery(localHdr(), planted, { settings: sealedGate });
+    check(gPlanted.ok === false && gPlanted.reason === 'surgery-phrase',
+      '★门:承诺句只藏在包内 `key` 里 ⇒ 拒 surgery-phrase(修前门放行、importBundle 已执行)');
+    const noUnlock = JSON.stringify({ bundle: { deep: [{ key: 'deep:s-1', value: 'x' }] }, persona: true });
+    const gNoUnlock = requireSurgery(localHdr(), noUnlock, { settings: sealedGate });
+    check(gNoUnlock.ok === false && gNoUnlock.reason === 'surgery-phrase',
+      '★门:顶层没有 unlock ⇒ 拒(不拿包内任何东西顶替)');
+  }
   check(surgeryLogPath().startsWith(holder), '留痕路径在 $DSH_HOME/logs 之下(实为 ' + surgeryLogPath() + ')');
 
   // ── 8.7 §6.2 链基线标记(2026-10-01 下午)─────────────────────────────────────────
@@ -570,7 +607,7 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
   for (const ep of ['/persona/habits/scan', '/persona/habits/reflect']) {
     const b = blockOf(ep);
     check(b.length > 0, `A-1 前置:找得到 ${ep} 的 handler 块`);
-    check(/if \(!gateSurgery\(req, res, sendJson, \{ unlock: body\.unlock \}/.test(b),
+    check(/if \(!gateSurgery\(req, res, sendJson, \{ unlock: body\.unlock \}, \{ settings, logFile: surgeryLog, endpoint: '[^']+', veto: vetoArgsOf\(body\), patch: \{ persona: \{ habitsPending: true \} \} \}\)\) return;\n      const vv = vetoConsume\(\{ settings, memory, req \}\);\n      if \(!vv\.ok\) return vetoReject\(res, sendJson, vv\);/.test(b),
       `★A-1 手术门:${ep} 的 handler 里接了 gateSurgery(交办单判据①)`);
     check(/const body = JSON\.parse\(\(await readBody\(req\)\) \|\| '\{\}'\)/.test(b),
       `★A-1 手术门:${ep} **先解析 body、再判门**(请求流只能读一次 ⇒ 顺序反了门就拿不到 unlock)`);
@@ -625,8 +662,8 @@ check(!/settings\.update\(\{ persona: p, styles: st \}\)/.test(apiSrc), '/import
 //    · 删掉了端点 ⇒ 从数组里删掉;**数与列表必须同批改**(否则数字与列表会互相说谎)。
 // 判据来源:`plans\AUDIT-dsh-ling-1.5.3-端点写面-未进POST_ONLY.md`(逐条读过 handler 的那份审计)。
 {
-  const POST_ONLY_ROUTES_TOTAL = 94;   // 已注册端点数(disposers.push(register('…')));88 → 90 = 1.7 导入通道两条(2026-10-10);90 → 91 = 浏览面 /library/browse 一条(2026-10-13,纯读);91 → 92 = 结论层只读面 /deep/items 一条(B 档,2026-10-15,纯读);92 → 93 = 后台行为开关 /auto 一条(2026-10-16,**双方法**:GET 读生效值 / POST 写 settings.auto ⇒ 不进差集);93 → 94 = 注入面开关 /inject 一条(1.7.3,**双方法**:GET 读生效值 / POST 写 settings.inject ⇒ 不进差集)
-  const POST_ONLY_SET_SIZE = 63;   // POST_ONLY 集合条数;59 → 61 = 1.7 导入通道两条(两条都**是写面** ⇒ 差集不变);61 → 62 = /auto(它的**写半边**只许 POST ⇒ 进表;读半边另见 api.js 的 `DUAL_METHOD_READ_PATHS` —— 那张表只为它放行 GET,否则读半边会被这道闸 405 掉);62 → 63 = /inject(与 /auto 完全同形:写 `settings.inject` 只许 POST,读半边同在 `DUAL_METHOD_READ_PATHS` 里)
+  const POST_ONLY_ROUTES_TOTAL = 96;   // 已注册端点数(disposers.push(register('…')));88 → 90 = 1.7 导入通道两条(2026-10-10);90 → 91 = 浏览面 /library/browse 一条(2026-10-13,纯读);91 → 92 = 结论层只读面 /deep/items 一条(B 档,2026-10-15,纯读);92 → 93 = 后台行为开关 /auto 一条(2026-10-16,**双方法**:GET 读生效值 / POST 写 settings.auto ⇒ 不进差集);93 → 94 = 注入面开关 /inject 一条(1.7.3,**双方法**:GET 读生效值 / POST 写 settings.inject ⇒ 不进差集);94 → 95 = 后台模型 /model/background 一条(rc.4/M21-4,**双方法**:GET 读生效值 / POST 写 settings.model.background ⇒ 不进差集;读半边同时进 api.js 的 DUAL_METHOD_READ_PATHS);95 → 96 = 档位写面 /mode/effort 一条(rc.4/M21-7,**双方法**:GET 读当前档位 / POST 轻确认后只写 mode.mapping.<mode>.effort ⇒ 不进差集;读半边同时进 api.js 的 DUAL_METHOD_READ_PATHS)⇒ rc.4 两个新端点**合计** 94 → 96(95 是 M21-4 单独落地时的**中间态实测值**,交接指令"改成 96"已由 M21-7 执行,见 _crew/reports/m21-7/report.md)
+  const POST_ONLY_SET_SIZE = 65;   // POST_ONLY 集合条数;59 → 61 = 1.7 导入通道两条(两条都**是写面** ⇒ 差集不变);61 → 62 = /auto(它的**写半边**只许 POST ⇒ 进表;读半边另见 api.js 的 `DUAL_METHOD_READ_PATHS` —— 那张表只为它放行 GET,否则读半边会被这道闸 405 掉);62 → 63 = /inject(与 /auto 完全同形:写 `settings.inject` 只许 POST,读半边同在 `DUAL_METHOD_READ_PATHS` 里);63 → 64 = /model/background 的**写半边**(rc.4/M21-4,与 /auto、/inject 完全同形:写 `settings.model.background` 只许 POST,读半边同在 `DUAL_METHOD_READ_PATHS` 里);64 → 65 = /mode/effort 的**写半边**(rc.4/M21-7,同形:写 `settings.mode.mapping.<mode>.effort` 只许 POST,读半边同在 `DUAL_METHOD_READ_PATHS` 里)⇒ rc.4 两个新端点**合计** 63 → 65(64 是 M21-4 单独落地时的**中间态实测值**,交接指令"改成 65"已由 M21-7 执行)
   const POST_ONLY_DIFF_SNAPSHOT = [
     '/surgery/events',            // 事后日志(读手术门留痕),GET 不写
     '/health',
